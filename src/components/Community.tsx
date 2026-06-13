@@ -1,245 +1,454 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, Star } from 'lucide-react';
+import { useState } from 'react';
+import { Heart, MessageCircle, Repeat2, BarChart2, Image, X, Send, PlusCircle, TrendingUp } from 'lucide-react';
 import { useAuth } from '../app/main';
-import { matches, initialReviews, initialPolls } from '../data/mockData';
-import type { Review, Poll } from '../data/mockData';
+import { initialPosts, SocialPost, PostComment, Poll } from '../data/mockData';
 
-function loadReviews(): Review[] {
+// ─── Storage ──────────────────────────────────────────────────────────────────
+
+function loadPosts(): SocialPost[] {
   try {
-    const stored = localStorage.getItem('gorugby_reviews');
-    if (stored) return JSON.parse(stored);
+    const s = localStorage.getItem('gorugby_posts');
+    if (s) return JSON.parse(s);
   } catch { /* ignore */ }
-  const seed = [...initialReviews];
-  localStorage.setItem('gorugby_reviews', JSON.stringify(seed));
+  const seed = [...initialPosts];
+  localStorage.setItem('gorugby_posts', JSON.stringify(seed));
   return seed;
 }
 
-function saveReviews(r: Review[]) { localStorage.setItem('gorugby_reviews', JSON.stringify(r)); }
+function savePosts(p: SocialPost[]) { localStorage.setItem('gorugby_posts', JSON.stringify(p)); }
 
-function loadPolls(): Poll[] {
-  try {
-    const stored = localStorage.getItem('gorugby_polls');
-    if (stored) return JSON.parse(stored);
-  } catch { /* ignore */ }
-  const seed = [...initialPolls];
-  localStorage.setItem('gorugby_polls', JSON.stringify(seed));
-  return seed;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeAgo(dateStr: string): string {
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60)    return 'Ahora';
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
 }
 
-function savePolls(p: Poll[]) { localStorage.setItem('gorugby_polls', JSON.stringify(p)); }
+function daysRemaining(dateStr: string): number {
+  return Math.max(0, Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000));
+}
 
-const completedMatches = matches.filter(m => m.status === 'finished' || m.status === 'live');
+// ─── Poll Widget ──────────────────────────────────────────────────────────────
 
-export default function Community() {
+function PollWidget({ poll, postId, onVote }: {
+  poll: Poll;
+  postId: string;
+  onVote: (postId: string, optionId: string) => void;
+}) {
   const { user } = useAuth();
-  const [reviews, setReviews]   = useState<Review[]>(loadReviews);
-  const [polls, setPolls]       = useState<Poll[]>(loadPolls);
-  const [tab, setTab]           = useState<'reviews' | 'polls'>('reviews');
-
-  // Review form state
-  const [selectedMatch, setSelectedMatch] = useState('');
-  const [rating, setRating]               = useState(0);
-  const [hoverRating, setHoverRating]     = useState(0);
-  const [comment, setComment]             = useState('');
-  const [formError, setFormError]         = useState('');
-
-  const submitReview = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedMatch) { setFormError('Seleccioná un partido'); return; }
-    if (!rating)         { setFormError('Ponele una valoración al partido'); return; }
-    if (comment.trim().length < 10) { setFormError('Escribí al menos 10 caracteres'); return; }
-
-    const newReview: Review = {
-      id: `r_${Date.now()}`,
-      matchId: Number(selectedMatch),
-      userId: user!.id,
-      userName: user!.name,
-      rating,
-      comment: comment.trim(),
-      createdAt: new Date().toISOString(),
-      likes: 0,
-      likedBy: [],
-    };
-    const updated = [newReview, ...reviews];
-    setReviews(updated);
-    saveReviews(updated);
-    setSelectedMatch('');
-    setRating(0);
-    setComment('');
-    setFormError('');
-  };
-
-  const toggleLike = (reviewId: string) => {
-    if (!user) return;
-    const updated = reviews.map(r => {
-      if (r.id !== reviewId) return r;
-      const liked = r.likedBy.includes(user.id);
-      return {
-        ...r,
-        likes: liked ? r.likes - 1 : r.likes + 1,
-        likedBy: liked ? r.likedBy.filter(id => id !== user.id) : [...r.likedBy, user.id],
-      };
-    });
-    setReviews(updated);
-    saveReviews(updated);
-  };
-
-  const votePoll = (pollId: string, optionId: string) => {
-    if (!user) return;
-    const updated = polls.map(p => {
-      if (p.id !== pollId) return p;
-      if (p.voters.includes(user.id)) return p;
-      return {
-        ...p,
-        voters: [...p.voters, user.id],
-        options: p.options.map(o => o.id === optionId ? { ...o, votes: o.votes + 1 } : o),
-      };
-    });
-    setPolls(updated);
-    savePolls(updated);
-  };
+  const hasVoted  = user ? poll.voters.includes(user.id) : false;
+  const total     = poll.options.reduce((s, o) => s + o.votes, 0);
+  const maxVotes  = Math.max(...poll.options.map(o => o.votes));
+  const days      = daysRemaining(poll.expiresAt);
+  const expired   = days === 0;
+  const canVote   = !hasVoted && !expired && !!user;
 
   return (
-    <div>
-      <div className="filter-tabs" style={{ marginBottom: 22 }}>
-        <button className={`filter-tab${tab === 'reviews' ? ' active' : ''}`} onClick={() => setTab('reviews')}>Reseñas</button>
-        <button className={`filter-tab${tab === 'polls'   ? ' active' : ''}`} onClick={() => setTab('polls')}>Encuestas</button>
-      </div>
+    <div className="poll-widget">
+      <div className="poll-widget-options">
+        {poll.options.map(opt => {
+          const pct      = total > 0 ? Math.round((opt.votes / total) * 100) : 0;
+          const isLeader = opt.votes === maxVotes && total > 0;
 
-      {tab === 'reviews' && (
-        <div className="content-grid">
-          <div>
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Reseñas de la comunidad</span>
-                <span className="tag tag-gray">{reviews.length} reseñas</span>
-              </div>
-              {reviews.length === 0 ? (
-                <div className="empty-state"><div className="empty-state-icon">✍️</div><p>Sé el primero en dejar una reseña</p></div>
-              ) : (
-                <div className="match-list">
-                  {reviews.map(r => {
-                    const match = matches.find(m => m.id === r.matchId);
-                    const liked = user ? r.likedBy.includes(user.id) : false;
-                    return (
-                      <div key={r.id} className="review-card">
-                        <div className="review-header">
-                          <div className="review-avatar">{r.userName.split(' ').map(w => w[0]).slice(0,2).join('')}</div>
-                          <div className="review-meta">
-                            <div className="review-name">{r.userName}</div>
-                            <div className="review-date">{new Date(r.createdAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-                          </div>
-                          <StarDisplay rating={r.rating} />
-                        </div>
-                        <p className="review-text">{r.comment}</p>
-                        <div className="review-footer">
-                          <button className={`review-like${liked ? ' liked' : ''}`} onClick={() => toggleLike(r.id)}>
-                            <Heart size={13} /> {r.likes}
-                          </button>
-                          {match && (
-                            <span className="review-match-tag">{match.home} vs {match.away}</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Escribir reseña</span>
-              </div>
-              <form onSubmit={submitReview}>
-                <div className="form-group">
-                  <label>Partido</label>
-                  <select value={selectedMatch} onChange={e => setSelectedMatch(e.target.value)}>
-                    <option value="">Seleccionar partido...</option>
-                    {completedMatches.map(m => (
-                      <option key={m.id} value={m.id}>{m.home} vs {m.away} · {m.date}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Valoración</label>
-                  <div className="stars" style={{ padding: '4px 0' }}>
-                    {[1,2,3,4,5].map(n => (
-                      <Star
-                        key={n}
-                        size={28}
-                        className={`star${(hoverRating || rating) >= n ? ' filled' : ' empty'}`}
-                        onMouseEnter={() => setHoverRating(n)}
-                        onMouseLeave={() => setHoverRating(0)}
-                        onClick={() => setRating(n)}
-                        fill={(hoverRating || rating) >= n ? 'currentColor' : 'none'}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label>Comentario</label>
-                  <textarea
-                    value={comment}
-                    onChange={e => setComment(e.target.value)}
-                    placeholder="¿Qué te pareció el partido? Contá tu experiencia..."
-                    rows={4}
-                  />
-                </div>
-                {formError && <p className="form-error">{formError}</p>}
-                <button type="submit" className="btn btn-primary full">Publicar reseña</button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === 'polls' && (
-        <div className="content-grid-3">
-          {polls.map(poll => {
-            const totalVotes = poll.options.reduce((s, o) => s + o.votes, 0);
-            const hasVoted   = user ? poll.voters.includes(user.id) : false;
+          if (canVote) {
             return (
-              <div key={poll.id} className="poll-card">
-                <div className="poll-question">{poll.question}</div>
-                <div className="poll-options">
-                  {poll.options.map(opt => {
-                    const pct = totalVotes > 0 ? Math.round((opt.votes / totalVotes) * 100) : 0;
-                    return (
-                      <div
-                        key={opt.id}
-                        className={`poll-option${hasVoted ? ' voted' : ''}`}
-                        onClick={() => !hasVoted && votePoll(poll.id, opt.id)}
-                      >
-                        <div className="poll-progress" style={{ width: hasVoted ? `${pct}%` : '0%' }} />
-                        <div className="poll-option-inner">
-                          <span className="poll-option-text">{opt.text}</span>
-                          {hasVoted && <span className="poll-option-pct">{pct}%</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="poll-footer">
-                  {hasVoted ? `${totalVotes.toLocaleString('es-AR')} votos · Vence: ${poll.expiresAt}` : `Votá · Vence: ${poll.expiresAt}`}
-                </div>
-              </div>
+              <button key={opt.id} className="poll-vote-btn" onClick={() => onVote(postId, opt.id)}>
+                {opt.text}
+              </button>
             );
-          })}
-        </div>
-      )}
+          }
+
+          return (
+            <div key={opt.id} className={`poll-result-row${isLeader ? ' leader' : ''}`}>
+              <div className="poll-result-fill" style={{ width: `${pct}%` }} />
+              <div className="poll-result-content">
+                <span className="poll-result-text">
+                  {isLeader && <TrendingUp size={11} style={{ marginRight: 4 }} />}
+                  {opt.text}
+                </span>
+                <span className="poll-result-pct">{pct}%</span>
+              </div>
+              <div className="poll-result-votes">{opt.votes.toLocaleString('es-AR')} votos</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="poll-widget-footer">
+        <BarChart2 size={12} />
+        <span>{total.toLocaleString('es-AR')} votos en total</span>
+        <span className="poll-sep">·</span>
+        {expired
+          ? <span className="poll-expired">Encuesta finalizada</span>
+          : <span>Cierra en {days} día{days !== 1 ? 's' : ''}</span>}
+        {!user && <span className="poll-sep">· Iniciá sesión para votar</span>}
+      </div>
     </div>
   );
 }
 
-function StarDisplay({ rating }: { rating: number }) {
+// ─── Post Card ────────────────────────────────────────────────────────────────
+
+function PostCard({ post, onLike, onComment, onVote }: {
+  post: SocialPost;
+  onLike: (id: string) => void;
+  onComment: (postId: string, text: string) => void;
+  onVote: (postId: string, optionId: string) => void;
+}) {
+  const { user }           = useAuth();
+  const [showComments, setShowComments] = useState(false);
+  const [commentText,  setCommentText]  = useState('');
+  const liked = user ? post.likedBy.includes(user.id) : false;
+
+  const submitComment = () => {
+    if (!commentText.trim() || !user) return;
+    onComment(post.id, commentText.trim());
+    setCommentText('');
+  };
+
+  const initials = user ? user.name.split(' ').map(w => w[0]).slice(0, 2).join('') : '?';
+
   return (
-    <div className="stars">
-      {[1,2,3,4,5].map(n => (
-        <Star key={n} size={14} className={`star${rating >= n ? ' filled' : ' empty'}`} fill={rating >= n ? 'currentColor' : 'none'} style={{ cursor: 'default' }} />
-      ))}
+    <article className="social-post">
+      <div className="social-avatar">{post.userInitials}</div>
+
+      <div className="social-post-body">
+        {/* Header */}
+        <div className="social-post-header">
+          <span className="social-post-name">{post.userName}</span>
+          <span className="social-post-handle">@{post.userId}</span>
+          <span className="social-sep">·</span>
+          <span className="social-post-time">{timeAgo(post.createdAt)}</span>
+        </div>
+
+        {/* Text */}
+        <p className="social-post-text">{post.text}</p>
+
+        {/* Image */}
+        {post.imageUrl && (
+          <div className="social-post-img">
+            <img
+              src={post.imageUrl}
+              alt="Imagen del post"
+              onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; }}
+            />
+          </div>
+        )}
+
+        {/* Poll */}
+        {post.type === 'poll' && post.poll && (
+          <PollWidget poll={post.poll} postId={post.id} onVote={onVote} />
+        )}
+
+        {/* Action bar */}
+        <div className="social-actions">
+          <button
+            className={`social-action-btn${showComments ? ' active' : ''}`}
+            onClick={() => setShowComments(!showComments)}
+          >
+            <MessageCircle size={15} />
+            {post.comments.length > 0 && <span>{post.comments.length}</span>}
+          </button>
+          <button className="social-action-btn">
+            <Repeat2 size={15} />
+            {post.reposts > 0 && <span>{post.reposts}</span>}
+          </button>
+          <button
+            className={`social-action-btn like${liked ? ' liked' : ''}`}
+            onClick={() => onLike(post.id)}
+          >
+            <Heart size={15} fill={liked ? 'currentColor' : 'none'} />
+            {post.likes > 0 && <span>{post.likes}</span>}
+          </button>
+        </div>
+
+        {/* Comments thread */}
+        {showComments && (
+          <div className="social-thread">
+            {post.comments.map(c => (
+              <div key={c.id} className="thread-comment">
+                <div className="thread-avatar">{c.userInitials}</div>
+                <div className="thread-comment-body">
+                  <div className="thread-comment-header">
+                    <span className="thread-comment-name">{c.userName}</span>
+                    <span className="social-sep">·</span>
+                    <span className="thread-comment-time">{timeAgo(c.createdAt)}</span>
+                  </div>
+                  <p className="thread-comment-text">{c.text}</p>
+                  <button className={`social-action-btn small${user && c.likedBy.includes(user.id) ? ' liked' : ''}`}>
+                    <Heart size={11} fill={user && c.likedBy.includes(user.id) ? 'currentColor' : 'none'} />
+                    {c.likes > 0 && <span>{c.likes}</span>}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {user && (
+              <div className="thread-compose">
+                <div className="thread-avatar small">{initials}</div>
+                <div className="thread-input-wrap">
+                  <input
+                    className="thread-input"
+                    value={commentText}
+                    onChange={e => setCommentText(e.target.value)}
+                    placeholder="Respondé..."
+                    onKeyDown={e => e.key === 'Enter' && submitComment()}
+                  />
+                  <button
+                    className="thread-send"
+                    onClick={submitComment}
+                    disabled={!commentText.trim()}
+                  >
+                    <Send size={13} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+// ─── Post Composer ────────────────────────────────────────────────────────────
+
+function PostComposer({ onPost }: {
+  onPost: (text: string, imageUrl?: string, poll?: Poll) => void;
+}) {
+  const { user } = useAuth();
+  const [text,          setText]          = useState('');
+  const [imageUrl,      setImageUrl]      = useState('');
+  const [showImg,       setShowImg]       = useState(false);
+  const [isPoll,        setIsPoll]        = useState(false);
+  const [pollOptions,   setPollOptions]   = useState(['', '']);
+  const [pollDays,      setPollDays]      = useState(7);
+
+  if (!user) return null;
+
+  const initials = user.name.split(' ').map(w => w[0]).slice(0, 2).join('');
+  const charsLeft = 280 - text.length;
+  const canPost   = text.trim().length > 0 && charsLeft >= 0;
+
+  const submit = () => {
+    if (!canPost) return;
+    let poll: Poll | undefined;
+    if (isPoll) {
+      const validOpts = pollOptions.filter(o => o.trim());
+      if (validOpts.length >= 2) {
+        const exp = new Date();
+        exp.setDate(exp.getDate() + pollDays);
+        poll = {
+          id: `poll_${Date.now()}`,
+          question: text.trim(),
+          options: validOpts.map((o, i) => ({ id: `po${i}`, text: o.trim(), votes: 0 })),
+          expiresAt: exp.toISOString().split('T')[0],
+          voters: [],
+        };
+      }
+    }
+    onPost(text.trim(), showImg && imageUrl.trim() ? imageUrl.trim() : undefined, poll);
+    setText(''); setImageUrl(''); setShowImg(false);
+    setIsPoll(false); setPollOptions(['', '']);
+  };
+
+  const toggleImg  = () => { setShowImg(!showImg); setIsPoll(false); };
+  const togglePoll = () => { setIsPoll(!isPoll);   setShowImg(false); };
+
+  return (
+    <div className="post-composer">
+      <div className="social-avatar composer-self">{initials}</div>
+      <div className="composer-body">
+        <textarea
+          className="composer-textarea"
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder={isPoll ? '¿Cuál es tu pregunta?' : '¿Qué está pasando en el rugby?'}
+          rows={3}
+        />
+
+        {showImg && (
+          <div className="composer-img-row">
+            <input
+              className="composer-img-input"
+              value={imageUrl}
+              onChange={e => setImageUrl(e.target.value)}
+              placeholder="URL de imagen o meme..."
+            />
+            {imageUrl && (
+              <img
+                src={imageUrl}
+                alt="preview"
+                className="composer-img-preview"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            )}
+          </div>
+        )}
+
+        {isPoll && (
+          <div className="composer-poll">
+            {pollOptions.map((opt, idx) => (
+              <div key={idx} className="composer-poll-row">
+                <input
+                  className="composer-poll-input"
+                  value={opt}
+                  onChange={e => {
+                    const next = [...pollOptions];
+                    next[idx] = e.target.value;
+                    setPollOptions(next);
+                  }}
+                  placeholder={idx < 2 ? `Opción ${idx + 1}` : `Opción ${idx + 1} (opcional)`}
+                />
+                {idx >= 2 && (
+                  <button className="composer-poll-remove" onClick={() => setPollOptions(pollOptions.filter((_, i) => i !== idx))}>
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {pollOptions.length < 4 && (
+              <button className="composer-poll-add" onClick={() => setPollOptions([...pollOptions, ''])}>
+                <PlusCircle size={13} /> Agregar opción
+              </button>
+            )}
+            <div className="composer-poll-duration">
+              <span className="composer-poll-duration-label">Duración:</span>
+              {[1, 3, 7, 14].map(d => (
+                <button
+                  key={d}
+                  className={`filter-chip${pollDays === d ? ' active' : ''}`}
+                  onClick={() => setPollDays(d)}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="composer-footer">
+          <div className="composer-tools">
+            <button className={`composer-tool${showImg ? ' active' : ''}`} onClick={toggleImg} title="Agregar imagen">
+              <Image size={17} />
+            </button>
+            <button className={`composer-tool${isPoll ? ' active' : ''}`} onClick={togglePoll} title="Crear encuesta">
+              <BarChart2 size={17} />
+            </button>
+          </div>
+          <div className="composer-submit-row">
+            <span className={`composer-chars${charsLeft < 20 ? ' warn' : ''}${charsLeft < 0 ? ' over' : ''}`}>
+              {charsLeft}
+            </span>
+            <button className="btn btn-primary btn-sm" onClick={submit} disabled={!canPost}>
+              Publicar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+export default function Community() {
+  const { user } = useAuth();
+  const [posts, setPosts] = useState<SocialPost[]>(loadPosts);
+
+  const createPost = (text: string, imageUrl?: string, poll?: Poll) => {
+    if (!user) return;
+    const np: SocialPost = {
+      id: `post_${Date.now()}`,
+      userId: user.id,
+      userName: user.name,
+      userInitials: user.name.split(' ').map(w => w[0]).slice(0, 2).join(''),
+      text,
+      imageUrl,
+      type: poll ? 'poll' : 'post',
+      poll,
+      createdAt: new Date().toISOString(),
+      likes: 0,
+      likedBy: [],
+      comments: [],
+      reposts: 0,
+    };
+    const updated = [np, ...posts];
+    setPosts(updated);
+    savePosts(updated);
+  };
+
+  const likePost = (postId: string) => {
+    if (!user) return;
+    const updated = posts.map(p => {
+      if (p.id !== postId) return p;
+      const liked = p.likedBy.includes(user.id);
+      return {
+        ...p,
+        likes: liked ? p.likes - 1 : p.likes + 1,
+        likedBy: liked ? p.likedBy.filter(id => id !== user.id) : [...p.likedBy, user.id],
+      };
+    });
+    setPosts(updated);
+    savePosts(updated);
+  };
+
+  const commentOnPost = (postId: string, text: string) => {
+    if (!user) return;
+    const nc: PostComment = {
+      id: `c_${Date.now()}`,
+      userId: user.id,
+      userName: user.name,
+      userInitials: user.name.split(' ').map(w => w[0]).slice(0, 2).join(''),
+      text,
+      createdAt: new Date().toISOString(),
+      likes: 0,
+      likedBy: [],
+    };
+    const updated = posts.map(p =>
+      p.id === postId ? { ...p, comments: [...p.comments, nc] } : p
+    );
+    setPosts(updated);
+    savePosts(updated);
+  };
+
+  const votePoll = (postId: string, optionId: string) => {
+    if (!user) return;
+    const updated = posts.map(p => {
+      if (p.id !== postId || !p.poll) return p;
+      if (p.poll.voters.includes(user.id)) return p;
+      return {
+        ...p,
+        poll: {
+          ...p.poll,
+          voters: [...p.poll.voters, user.id],
+          options: p.poll.options.map(o =>
+            o.id === optionId ? { ...o, votes: o.votes + 1 } : o
+          ),
+        },
+      };
+    });
+    setPosts(updated);
+    savePosts(updated);
+  };
+
+  return (
+    <div className="community-page">
+      <div className="social-feed">
+        <PostComposer onPost={createPost} />
+        <div className="feed-divider" />
+        {posts.map(post => (
+          <PostCard
+            key={post.id}
+            post={post}
+            onLike={likePost}
+            onComment={commentOnPost}
+            onVote={votePoll}
+          />
+        ))}
+      </div>
     </div>
   );
 }
