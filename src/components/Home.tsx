@@ -31,11 +31,11 @@ export default function Home({ setSection }: Props) {
         <div style={{ position: 'absolute', width: 300, height: 300, borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)', top: -100, right: -50 }} />
         <div style={{ zIndex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>
-            Bienvenido, {user?.name.split(' ')[0]} 👋
+            Bienvenido, {user?.name.split(' ')[0]}
           </div>
           <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.55)' }}>
             {liveCount > 0
-              ? `🔴 ${liveCount} partido${liveCount > 1 ? 's' : ''} en vivo ahora mismo`
+              ? `${liveCount} partido${liveCount > 1 ? 's' : ''} en vivo ahora mismo`
               : 'Próximo partido: ' + (matches.find(m => m.status === 'upcoming')?.date ?? 'próximamente')}
           </div>
         </div>
@@ -228,7 +228,7 @@ export function MatchCard({ match: m }: { match: Match }) {
           <div className="match-team-name">{m.away}</div>
         </div>
       </div>
-      {m.venue && <div className="match-venue">📍 {m.venue}</div>}
+      {m.venue && <div className="match-venue">{m.venue}</div>}
     </div>
   );
 }

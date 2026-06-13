@@ -37,7 +37,7 @@ export default function Settings() {
             <div className="settings-desc">Cambia entre modo claro, oscuro o automático</div>
           </div>
           <div className="radio-group">
-            {([['light','☀️ Claro'],['dark','🌙 Oscuro'],['system','⚙️ Auto']] as [ThemeMode,string][]).map(([id,label]) => (
+            {([['light','Claro'],['dark','Oscuro'],['system','Auto']] as [ThemeMode,string][]).map(([id,label]) => (
               <button key={id} className={`radio-btn${theme === id ? ' selected' : ''}`} onClick={() => setTheme(id)}>
                 {label}
               </button>
@@ -87,9 +87,9 @@ export default function Settings() {
             <div className="settings-desc">Cambia el idioma en toda la plataforma</div>
           </div>
           <div className="radio-group">
-            <button className="radio-btn selected">🇦🇷 Español</button>
-            <button className="radio-btn" style={{ opacity: 0.5, cursor: 'not-allowed' }}>🇬🇧 English</button>
-            <button className="radio-btn" style={{ opacity: 0.5, cursor: 'not-allowed' }}>🇧🇷 Português</button>
+            <button className="radio-btn selected">Español</button>
+            <button className="radio-btn" style={{ opacity: 0.5, cursor: 'not-allowed' }}>English</button>
+            <button className="radio-btn" style={{ opacity: 0.5, cursor: 'not-allowed' }}>Português</button>
           </div>
         </div>
       </div>
