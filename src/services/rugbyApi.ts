@@ -102,6 +102,11 @@ export interface NormalisedMatch {
   country: string;
   season: string;
   round?: string;
+  periods?: {
+    first?:    { home: number | null; away: number | null };
+    second?:   { home: number | null; away: number | null };
+    overtime?: { home: number | null; away: number | null };
+  };
 }
 
 export interface NormalisedLeague {
@@ -182,6 +187,11 @@ export function normaliseGame(g: ApiGame): NormalisedMatch {
     country:        g.country.name,
     season:         String(g.league.season),
     round:          g.week ?? undefined,
+    periods: {
+      first:    g.periods?.first    ?? undefined,
+      second:   g.periods?.second   ?? undefined,
+      overtime: g.periods?.overtime ?? undefined,
+    },
   };
 }
 

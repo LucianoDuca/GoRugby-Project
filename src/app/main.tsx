@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import { createRoot } from 'react-dom/client';
 import '../styles/styles.css';
 import { seedUsers, User } from '../data/mockData';
+import { rugbyApi, NormalisedMatch } from '../services/rugbyApi';
 import Auth from '../components/Auth';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
@@ -50,6 +51,18 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | null>(null);
 export const useTheme = () => useContext(ThemeContext)!;
 
+// ─── Live Context ─────────────────────────────────────────────────────────────
+
+interface LiveContextType {
+  liveCount:    number;
+  liveMatches:  NormalisedMatch[];
+  todayMatches: NormalisedMatch[];
+  apiOnline:    boolean;
+}
+
+const LiveContext = createContext<LiveContextType>({ liveCount: 0, liveMatches: [], todayMatches: [], apiOnline: true });
+export const useLive = () => useContext(LiveContext);;
+
 // ─── Persistence helpers ──────────────────────────────────────────────────────
 
 function getUsers(): User[] {
@@ -85,6 +98,24 @@ function App() {
   const [theme,    setThemeState]    = useState<ThemeMode>  (() => load('gorugby_theme',    'light'));
   const [accent,   setAccentState]   = useState<AccentColor>(() => load('gorugby_accent',   'green'));
   const [fontSize, setFontSizeState] = useState<FontSize>   (() => load('gorugby_fontsize', 'normal'));
+
+  // Live data — fetched once per 5 min, shared via LiveContext
+  const [todayMatches, setTodayMatches] = useState<NormalisedMatch[]>([]);
+  const [apiOnline,    setApiOnline]    = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    const doFetch = () =>
+      rugbyApi.getTodayGames()
+        .then(d => { setTodayMatches(d); setApiOnline(true); })
+        .catch(() => setApiOnline(false));
+    doFetch();
+    const id = setInterval(doFetch, 5 * 60_000);
+    return () => clearInterval(id);
+  }, [user]);
+
+  const liveMatches = todayMatches.filter(m => m.status === 'live');
+  const liveCtx: LiveContextType = { liveCount: liveMatches.length, liveMatches, todayMatches, apiOnline };
 
   // Apply theme to DOM
   useEffect(() => {
@@ -158,23 +189,25 @@ function App() {
   return (
     <ThemeContext.Provider value={themeCtx}>
       <AuthContext.Provider value={authCtx}>
-        <div className="app-shell">
-          <Sidebar section={section} setSection={setSection} />
-          <div className="main-content">
-            <TopBar section={section} setSection={setSection} />
-            <div className="page-content">
-              {section === 'home'        && <Home setSection={setSection} />}
-              {section === 'matches'     && <Matches />}
-              {section === 'community'   && <Community />}
-              {section === 'tournaments' && <Tournaments />}
-              {section === 'clubs'       && <Clubs />}
-              {section === 'profile'     && <Profile />}
-              {section === 'admin'       && user.role === 'admin' && <Admin />}
-              {section === 'settings'    && <Settings />}
+        <LiveContext.Provider value={liveCtx}>
+          <div className="app-shell">
+            <Sidebar section={section} setSection={setSection} />
+            <div className="main-content">
+              <TopBar section={section} setSection={setSection} />
+              <div className="page-content">
+                {section === 'home'        && <Home setSection={setSection} />}
+                {section === 'matches'     && <Matches />}
+                {section === 'community'   && <Community />}
+                {section === 'tournaments' && <Tournaments />}
+                {section === 'clubs'       && <Clubs />}
+                {section === 'profile'     && <Profile />}
+                {section === 'admin'       && user.role === 'admin' && <Admin />}
+                {section === 'settings'    && <Settings />}
+              </div>
             </div>
+            <MobileNav section={section} setSection={setSection} />
           </div>
-          <MobileNav section={section} setSection={setSection} />
-        </div>
+        </LiveContext.Provider>
       </AuthContext.Provider>
     </ThemeContext.Provider>
   );

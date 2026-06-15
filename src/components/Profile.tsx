@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
-import { Edit3, Save, X, Star, Trophy, MessageCircle, Shield } from 'lucide-react';
+import { Edit3, Save, X, Star, Trophy, MessageCircle, Shield, TrendingUp, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useAuth } from '../app/main';
 import { clubs, matches, initialReviews } from '../data/mockData';
 import { ClubLogo, ClubBadge } from './ClubLogo';
+import { loadPredictions, getPredictionStats, Prediction } from '../utils/predictions';
+
+type ProfileTab = 'perfil' | 'predicciones';
 
 export default function Profile() {
   const { user, updateUser, logout } = useAuth();
+  const [tab,      setTab]      = useState<ProfileTab>('perfil');
   const [editing,  setEditing]  = useState(false);
   const [name,     setName]     = useState(user?.name ?? '');
   const [bio,      setBio]      = useState(user?.bio ?? '');
@@ -18,13 +22,16 @@ export default function Profile() {
   if (!user) return null;
 
   const initials = user.name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
-  const club = clubs.find(c => c.id === user.clubId);
+  const club     = clubs.find(c => c.id === user.clubId);
 
-  // Recent reviews by this user
   const myReviews = (() => {
     try { return (JSON.parse(localStorage.getItem('gorugby_reviews') ?? '[]') as typeof initialReviews).filter(r => r.userId === user.id); }
     catch { return initialReviews.filter(r => r.userId === user.id); }
   })();
+
+  const predictions = loadPredictions();
+  const pstats      = getPredictionStats(predictions);
+  const sortedPreds = [...predictions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const save = () => {
     if (!name.trim()) { setError('El nombre no puede estar vacío'); return; }
@@ -50,10 +57,14 @@ export default function Profile() {
         <div className="profile-info">
           <h2>{user.name}</h2>
           <p>{user.email}</p>
-          {club && <p style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ClubBadge clubId={club.id} initials={club.logo} size={18} /> {club.name}
-          </p>}
-          {user.bio && <p style={{ marginTop: 6, fontStyle: 'italic', maxWidth: 400, color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{user.bio}</p>}
+          {club && (
+            <p style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ClubBadge clubId={club.id} initials={club.logo} size={18} /> {club.name}
+            </p>
+          )}
+          {user.bio && (
+            <p style={{ marginTop: 6, fontStyle: 'italic', maxWidth: 400, color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{user.bio}</p>
+          )}
         </div>
         <div className="profile-stats">
           <div className="profile-stat">
@@ -61,8 +72,12 @@ export default function Profile() {
             <div className="profile-stat-label">Reseñas</div>
           </div>
           <div className="profile-stat">
-            <div className="profile-stat-value">{user.totalPredictions}</div>
+            <div className="profile-stat-value">{pstats.total}</div>
             <div className="profile-stat-label">Predicciones</div>
+          </div>
+          <div className="profile-stat">
+            <div className="profile-stat-value">{pstats.accuracy}%</div>
+            <div className="profile-stat-label">Precisión</div>
           </div>
           <div className="profile-stat">
             <div className="profile-stat-value">{user.followedClubs.length}</div>
@@ -71,158 +86,247 @@ export default function Profile() {
         </div>
       </div>
 
-      <div className="content-grid">
-        <div>
-          {/* Edit form */}
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Información personal</span>
-              {!editing ? (
-                <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}><Edit3 size={13} /> Editar</button>
-              ) : (
-                <div style={{ display: 'flex', gap: 7 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={cancel}><X size={13} /> Cancelar</button>
-                  <button className="btn btn-primary btn-sm" onClick={save}><Save size={13} /> Guardar</button>
-                </div>
-              )}
-            </div>
+      {/* Tab bar */}
+      <div className="profile-tab-bar">
+        <button className={`profile-tab${tab === 'perfil' ? ' active' : ''}`} onClick={() => setTab('perfil')}>
+          Perfil
+        </button>
+        <button className={`profile-tab${tab === 'predicciones' ? ' active' : ''}`} onClick={() => setTab('predicciones')}>
+          Predicciones
+          {pstats.pending > 0 && <span className="profile-tab-badge">{pstats.pending}</span>}
+        </button>
+      </div>
 
-            {saved && (
-              <div className="toast success" style={{ marginBottom: 14 }}>✓ Perfil actualizado correctamente</div>
-            )}
-            {error && <p className="form-error" style={{ marginBottom: 10 }}>{error}</p>}
-
-            <DisplayOrEdit label="Nombre completo" editing={editing} value={name} display={user.name}>
-              <input type="text" value={name} onChange={e => setName(e.target.value)} />
-            </DisplayOrEdit>
-
-            <div className="form-group">
-              <label>Email</label>
-              <div style={{ padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', fontSize: 14, color: 'var(--text-3)', border: '1px solid var(--border)' }}>
-                {user.email}
+      {/* Profile tab */}
+      {tab === 'perfil' && (
+        <div className="content-grid">
+          <div>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Información personal</span>
+                {!editing ? (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}><Edit3 size={13} /> Editar</button>
+                ) : (
+                  <div style={{ display: 'flex', gap: 7 }}>
+                    <button className="btn btn-ghost btn-sm" onClick={cancel}><X size={13} /> Cancelar</button>
+                    <button className="btn btn-primary btn-sm" onClick={save}><Save size={13} /> Guardar</button>
+                  </div>
+                )}
               </div>
-            </div>
 
-            <DisplayOrEdit label="Sobre mí" editing={editing} value={bio} display={user.bio || 'Sin descripción'} faded={!user.bio}>
-              <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} placeholder="Contá algo sobre vos..." />
-            </DisplayOrEdit>
+              {saved && <div className="toast success" style={{ marginBottom: 14 }}>Perfil actualizado correctamente</div>}
+              {error && <p className="form-error" style={{ marginBottom: 10 }}>{error}</p>}
 
-            <div className="form-group">
-              <label>Club favorito</label>
-              {editing ? (
-                <select value={clubId} onChange={e => setClubId(e.target.value)}>
-                  <option value="">Sin club</option>
-                  {clubs.map(c => <option key={c.id} value={c.id}>{c.name} — {c.city}</option>)}
-                </select>
-              ) : (
-                <div style={{ padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', fontSize: 14, color: club ? 'var(--text)' : 'var(--text-3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {club ? <><ClubBadge clubId={club.id} initials={club.logo} size={22} /> {club.name}</> : 'Sin club asociado'}
+              <DisplayOrEdit label="Nombre completo" editing={editing} display={user.name}>
+                <input type="text" value={name} onChange={e => setName(e.target.value)} />
+              </DisplayOrEdit>
+
+              <div className="form-group">
+                <label>Email</label>
+                <div style={{ padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', fontSize: 14, color: 'var(--text-3)', border: '1px solid var(--border)' }}>
+                  {user.email}
                 </div>
+              </div>
+
+              <DisplayOrEdit label="Sobre mí" editing={editing} display={user.bio || 'Sin descripción'} faded={!user.bio}>
+                <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} placeholder="Contá algo sobre vos..." />
+              </DisplayOrEdit>
+
+              <div className="form-group">
+                <label>Club favorito</label>
+                {editing ? (
+                  <select value={clubId} onChange={e => setClubId(e.target.value)}>
+                    <option value="">Sin club</option>
+                    {clubs.map(c => <option key={c.id} value={c.id}>{c.name} — {c.city}</option>)}
+                  </select>
+                ) : (
+                  <div style={{ padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', fontSize: 14, color: club ? 'var(--text)' : 'var(--text-3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {club ? <><ClubBadge clubId={club.id} initials={club.logo} size={22} /> {club.name}</> : 'Sin club asociado'}
+                  </div>
+                )}
+              </div>
+
+              {editing && (
+                <>
+                  <div className="divider" />
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 8 }}>Cambiar contraseña (dejar vacío para no cambiar)</div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Nueva contraseña</label>
+                      <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mín. 6 caracteres" />
+                    </div>
+                    <div className="form-group">
+                      <label>Confirmar contraseña</label>
+                      <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Repetir contraseña" />
+                    </div>
+                  </div>
+                </>
               )}
             </div>
 
-            {editing && (
-              <>
-                <div className="divider" />
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 8 }}>Cambiar contraseña (dejar vacío para no cambiar)</div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Nueva contraseña</label>
-                    <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mín. 6 caracteres" />
-                  </div>
-                  <div className="form-group">
-                    <label>Confirmar contraseña</label>
-                    <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Repetir contraseña" />
-                  </div>
+            {myReviews.length > 0 && (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-header">
+                  <span className="card-title"><Star size={15} /> Mis reseñas</span>
+                  <span className="tag tag-gray">{myReviews.length}</span>
                 </div>
-              </>
+                <div className="review-list">
+                  {myReviews.slice(0, 3).map(r => {
+                    const match = matches.find(m => m.id === r.matchId);
+                    return (
+                      <div key={r.id} className="review-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)' }}>
+                            {match ? `${match.home} vs ${match.away}` : 'Partido'} · {new Date(r.createdAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
+                          </div>
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {[1,2,3,4,5].map(n => (
+                              <Star key={n} size={12} fill={r.rating >= n ? 'var(--gold)' : 'none'} color={r.rating >= n ? 'var(--gold)' : 'var(--border)'} />
+                            ))}
+                          </div>
+                        </div>
+                        <p className="review-text" style={{ marginBottom: 0 }}>{r.comment}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* My reviews */}
-          {myReviews.length > 0 && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-header">
-                <span className="card-title"><Star size={15} /> Mis reseñas</span>
-                <span className="tag tag-gray">{myReviews.length}</span>
+          <div>
+            <div className="card">
+              <div className="card-header"><span className="card-title">Resumen de cuenta</span></div>
+              <div className="admin-stat-row"><span>Miembro desde</span><strong>{user.joinedAt}</strong></div>
+              <div className="admin-stat-row"><span>Rol</span>
+                <span className={`tag ${user.role === 'admin' ? 'tag-red' : 'tag-green'}`}>
+                  {user.role === 'admin' ? 'Administrador' : 'Aficionado'}
+                </span>
               </div>
-              <div className="review-list">
-                {myReviews.slice(0, 3).map(r => {
-                  const match = matches.find(m => m.id === r.matchId);
+              <div className="admin-stat-row"><span>Reseñas</span><strong>{myReviews.length}</strong></div>
+              <div className="admin-stat-row"><span>Predicciones</span><strong>{pstats.total}</strong></div>
+              <div className="admin-stat-row"><span>Precisión</span><strong>{pstats.accuracy}%</strong></div>
+              <div className="admin-stat-row"><span>Racha actual</span><strong>{pstats.streak > 0 ? `${pstats.streak} seguidas` : '—'}</strong></div>
+              <div className="admin-stat-row"><span>Clubes seguidos</span><strong>{user.followedClubs.length}</strong></div>
+            </div>
+
+            {user.followedClubs.length > 0 && (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-header">
+                  <span className="card-title"><Shield size={15} /> Mis clubes</span>
+                </div>
+                {user.followedClubs.map(cid => {
+                  const c = clubs.find(cl => cl.id === cid);
+                  if (!c) return null;
                   return (
-                    <div key={r.id} className="review-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)' }}>
-                          {match ? `${match.home} vs ${match.away}` : 'Partido'} · {new Date(r.createdAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
-                        </div>
-                        <div style={{ display: 'flex', gap: 2 }}>
-                          {[1,2,3,4,5].map(n => (
-                            <Star key={n} size={12} fill={r.rating >= n ? 'var(--gold)' : 'none'} color={r.rating >= n ? 'var(--gold)' : 'var(--border)'} />
-                          ))}
-                        </div>
+                    <div key={cid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border-2)' }}>
+                      <ClubLogo clubId={c.id} initials={c.logo} size={38} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text)' }}>{c.name}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{c.city} · {c.followers.toLocaleString('es-AR')} seg.</div>
                       </div>
-                      <p className="review-text" style={{ marginBottom: 0 }}>{r.comment}</p>
+                      {user.clubId === c.id && <span className="tag tag-green">Principal</span>}
                     </div>
                   );
                 })}
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <div>
-          {/* Account summary */}
-          <div className="card">
-            <div className="card-header"><span className="card-title">Resumen de cuenta</span></div>
-            <div className="admin-stat-row"><span>Miembro desde</span><strong>{user.joinedAt}</strong></div>
-            <div className="admin-stat-row"><span>Rol</span>
-              <span className={`tag ${user.role === 'admin' ? 'tag-red' : 'tag-green'}`}>
-                {user.role === 'admin' ? 'Administrador' : 'Aficionado'}
-              </span>
-            </div>
-            <div className="admin-stat-row"><span>Reseñas</span><strong>{myReviews.length}</strong></div>
-            <div className="admin-stat-row"><span>Predicciones</span><strong>{user.totalPredictions}</strong></div>
-            <div className="admin-stat-row"><span>Clubes seguidos</span><strong>{user.followedClubs.length}</strong></div>
-          </div>
-
-          {/* Followed clubs */}
-          {user.followedClubs.length > 0 && (
             <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-header">
-                <span className="card-title"><Shield size={15} /> Mis clubes</span>
-              </div>
-              {user.followedClubs.map(cid => {
-                const c = clubs.find(cl => cl.id === cid);
-                if (!c) return null;
-                return (
-                  <div key={cid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border-2)' }}>
-                    <ClubLogo clubId={c.id} initials={c.logo} size={38} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text)' }}>{c.name}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{c.city} · {c.followers.toLocaleString('es-AR')} seg.</div>
-                    </div>
-                    {user.clubId === c.id && <span className="tag tag-green">Principal</span>}
-                  </div>
-                );
-              })}
+              <button className="btn btn-danger" style={{ width: '100%' }} onClick={logout}>
+                Cerrar sesión
+              </button>
             </div>
-          )}
-
-          {/* Logout */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <button className="btn btn-danger" style={{ width: '100%' }} onClick={logout}>
-              Cerrar sesión
-            </button>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Predictions tab */}
+      {tab === 'predicciones' && (
+        <div className="pred-tab-content">
+          {predictions.length === 0 ? (
+            <div className="empty-state" style={{ padding: '48px 20px' }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>🏉</div>
+              <p style={{ fontWeight: 600, color: 'var(--text)' }}>Sin predicciones todavía</p>
+              <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
+                Hacé click en cualquier partido próximo para predecir el resultado
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Stats boxes */}
+              <div className="pred-stats-grid">
+                <div className="pred-stat-box correct">
+                  <div className="num">{pstats.correct}</div>
+                  <div className="lbl">Correctas</div>
+                </div>
+                <div className="pred-stat-box">
+                  <div className="num">{pstats.accuracy}%</div>
+                  <div className="lbl">Precisión</div>
+                </div>
+                <div className="pred-stat-box streak">
+                  <div className="num">{pstats.streak}</div>
+                  <div className="lbl">Racha</div>
+                </div>
+              </div>
+
+              {/* Accuracy bar */}
+              {pstats.resolved > 0 && (
+                <div className="pred-accuracy-bar-wrap">
+                  <div className="pred-accuracy-label">
+                    <span>{pstats.correct} correctas / {pstats.resolved} resueltas</span>
+                    <span>{pstats.accuracy}%</span>
+                  </div>
+                  <div className="pred-accuracy-bar">
+                    <div className="pred-accuracy-fill" style={{ width: `${pstats.accuracy}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* List */}
+              <div className="pred-list">
+                {sortedPreds.map(p => (
+                  <PredictionItem key={p.id} pred={p} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// Helper component to reduce repetition
-function DisplayOrEdit({ label, editing, value, display, faded, children }: {
-  label: string; editing: boolean; value?: string; display: string; faded?: boolean; children: React.ReactNode;
+function PredictionItem({ pred: p }: { pred: Prediction }) {
+  const pickedTeam = p.pick === 'home' ? p.homeTeam : p.awayTeam;
+  const statusClass = !p.resolved ? 'pending' : p.correct ? 'correct' : 'wrong';
+  const dateLabel = new Date(p.matchDate + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+
+  return (
+    <div className={`pred-item ${statusClass}`}>
+      <div className="pred-item-icon">
+        {!p.resolved ? <Clock size={14} color="var(--blue)" /> :
+         p.correct   ? <CheckCircle size={14} color="var(--accent)" /> :
+                       <XCircle size={14} color="var(--live)" />}
+      </div>
+      <div className="pred-item-main">
+        <div className="pred-item-match">{p.homeTeam} vs {p.awayTeam}</div>
+        <div className="pred-item-meta">
+          {p.tournament} · {dateLabel} · Predijiste: <strong>{pickedTeam}</strong>
+          {p.resolved && p.homeScore !== undefined && (
+            <span style={{ marginLeft: 6 }}>· Final: {p.homeScore}–{p.awayScore}</span>
+          )}
+        </div>
+      </div>
+      <span className={`pred-item-badge ${statusClass}`}>
+        {!p.resolved ? 'Pendiente' : p.correct ? 'Correcto' : 'Incorrecto'}
+      </span>
+    </div>
+  );
+}
+
+function DisplayOrEdit({ label, editing, display, faded, children }: {
+  label: string; editing: boolean; display: string; faded?: boolean; children: React.ReactNode;
 }) {
   return (
     <div className="form-group">
