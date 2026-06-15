@@ -3,63 +3,82 @@ import { Search, MapPin, X, Calendar, Users, Globe, Loader, ChevronDown } from '
 import { clubs, matches } from '../data/mockData';
 import { useAuth } from '../app/main';
 import { ClubLogo } from './ClubLogo';
-import { rugbyApi, NormalisedTeam, NormalisedMatch, LEAGUES } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
 
 type Tab = 'local' | 'international';
 
+type IntlTeam = { id: string; name: string; logo: string; };
+
 const INTL_LEAGUES: { id: number; name: string; country: string }[] = [
-  { id: LEAGUES.SIX_NATIONS,        name: 'Six Nations',           country: 'Europa' },
-  { id: LEAGUES.RUGBY_CHAMPIONSHIP, name: 'Rugby Championship',    country: 'Mundo' },
-  { id: LEAGUES.PREMIERSHIP,        name: 'Premiership Rugby',     country: 'Inglaterra' },
-  { id: LEAGUES.TOP_14,             name: 'Top 14',                country: 'Francia' },
-  { id: LEAGUES.URC,                name: 'United Rugby Championship', country: 'Mundo' },
-  { id: LEAGUES.SUPER_RUGBY,        name: 'Super Rugby',           country: 'Mundo' },
-  { id: LEAGUES.TOP_12_ARG,         name: 'Top 12',                country: 'Argentina' },
+  { id: ESPN_LEAGUES.SIX_NATIONS,         name: 'Six Nations',               country: 'Europa'      },
+  { id: ESPN_LEAGUES.RUGBY_CHAMPIONSHIP,  name: 'Rugby Championship',        country: 'Mundo'       },
+  { id: ESPN_LEAGUES.PREMIERSHIP,         name: 'Premiership Rugby',         country: 'Inglaterra'  },
+  { id: ESPN_LEAGUES.TOP_14,              name: 'Top 14',                    country: 'Francia'     },
+  { id: ESPN_LEAGUES.URC,                 name: 'United Rugby Championship', country: 'Mundo'       },
+  { id: ESPN_LEAGUES.SUPER_RUGBY_PACIFIC, name: 'Super Rugby Pacific',       country: 'Pacífico'    },
+  { id: ESPN_LEAGUES.CHAMPIONS_CUP,       name: 'Champions Cup',             country: 'Europa'      },
+  { id: ESPN_LEAGUES.URBA_PRIMERA_A,      name: 'URBA Primera A',            country: 'Argentina'   },
+  { id: ESPN_LEAGUES.URBA_TOP_14_ARG,     name: 'URBA Top 14',              country: 'Argentina'   },
 ];
-const DEFAULT_SEASON = 2024;
+
+function extractTeams(ms: NormalisedMatch[]): IntlTeam[] {
+  const seen = new Set<string>();
+  const teams: IntlTeam[] = [];
+  for (const m of ms) {
+    if (m.homeId && !seen.has(m.homeId)) {
+      seen.add(m.homeId);
+      teams.push({ id: m.homeId, name: m.home, logo: m.homeLogo ?? '' });
+    }
+    if (m.awayId && !seen.has(m.awayId)) {
+      seen.add(m.awayId);
+      teams.push({ id: m.awayId, name: m.away, logo: m.awayLogo ?? '' });
+    }
+  }
+  return teams.sort((a, b) => a.name.localeCompare(b.name));
+}
 
 // ── International teams section ───────────────────────────────────────────────
 
 function InternationalClubs() {
-  const [selectedLeague, setSelectedLeague] = useState(INTL_LEAGUES[0]);
-  const [teams,          setTeams]          = useState<NormalisedTeam[]>([]);
-  const [teamMatches,    setTeamMatches]    = useState<NormalisedMatch[]>([]);
-  const [loading,        setLoading]        = useState(false);
-  const [selectedTeam,   setSelectedTeam]   = useState<NormalisedTeam | null>(null);
-  const [loadingMatches, setLoadingMatches] = useState(false);
+  const [selectedLeague,   setSelectedLeague]   = useState(INTL_LEAGUES[0]);
+  const [leagueMatches,    setLeagueMatches]    = useState<NormalisedMatch[]>([]);
+  const [loading,          setLoading]          = useState(false);
+  const [selectedTeam,     setSelectedTeam]     = useState<IntlTeam | null>(null);
   const [showLeaguePicker, setShowLeaguePicker] = useState(false);
-  const [query,          setQuery]          = useState('');
+  const [query,            setQuery]            = useState('');
 
-  const fetchTeams = (league: typeof INTL_LEAGUES[0]) => {
+  const fetchMatches = (league: typeof INTL_LEAGUES[0]) => {
     setLoading(true);
-    setTeams([]);
+    setLeagueMatches([]);
     setSelectedTeam(null);
-    rugbyApi.getTeams(league.id, DEFAULT_SEASON)
-      .then(t => setTeams(t))
-      .catch(() => setTeams([]))
+    espnApi.getLeagueGames(league.id)
+      .then(ms => setLeagueMatches(ms))
+      .catch(() => setLeagueMatches([]))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchTeams(selectedLeague); }, []);
+  useEffect(() => { fetchMatches(selectedLeague); }, []);
 
   const selectLeague = (league: typeof INTL_LEAGUES[0]) => {
     setSelectedLeague(league);
     setShowLeaguePicker(false);
     setQuery('');
-    fetchTeams(league);
+    fetchMatches(league);
   };
 
-  const openTeam = (team: NormalisedTeam) => {
-    setSelectedTeam(team);
-    setLoadingMatches(true);
-    rugbyApi.getFixtures(selectedLeague.id, DEFAULT_SEASON).then(ms => {
-      setTeamMatches(ms.filter(m => m.homeId === String(team.id) || m.awayId === String(team.id)));
-    }).finally(() => setLoadingMatches(false));
-  };
+  const teams = useMemo(() => extractTeams(leagueMatches), [leagueMatches]);
 
   const filtered = useMemo(
     () => teams.filter(t => !query || t.name.toLowerCase().includes(query.toLowerCase())),
     [teams, query]
+  );
+
+  const teamMatches = useMemo(
+    () => selectedTeam
+      ? leagueMatches.filter(m => m.homeId === selectedTeam.id || m.awayId === selectedTeam.id)
+      : [],
+    [selectedTeam, leagueMatches]
   );
 
   // Team detail view
@@ -83,8 +102,8 @@ function InternationalClubs() {
           <div>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{selectedTeam.name}</div>
             <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
-              <MapPin size={11} style={{ display: 'inline', marginRight: 4 }} />
-              {selectedTeam.country} · {selectedLeague.name} {DEFAULT_SEASON}
+              <Globe size={11} style={{ display: 'inline', marginRight: 4 }} />
+              {selectedLeague.name} · {selectedLeague.country}
             </div>
           </div>
         </div>
@@ -93,19 +112,14 @@ function InternationalClubs() {
           <div className="card-header">
             <span className="card-title">
               <Calendar size={14} style={{ display: 'inline', marginRight: 5 }} />
-              Temporada {DEFAULT_SEASON}
+              Partidos en {selectedLeague.name}
             </span>
             <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
               {teamMatches.length} partidos
             </span>
           </div>
 
-          {loadingMatches ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px', color: 'var(--text-3)' }}>
-              <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
-              Cargando partidos…
-            </div>
-          ) : teamMatches.length === 0 ? (
+          {teamMatches.length === 0 ? (
             <p style={{ padding: '16px', color: 'var(--text-3)', fontSize: 13 }}>Sin partidos registrados.</p>
           ) : (
             teamMatches.map(m => (
@@ -175,7 +189,8 @@ function InternationalClubs() {
               <button key={l.id}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  width: '100%', padding: '10px 14px', background: l.id === selectedLeague.id ? 'var(--accent-light, #dcfce7)' : 'none',
+                  width: '100%', padding: '10px 14px',
+                  background: l.id === selectedLeague.id ? 'var(--accent-light, #dcfce7)' : 'none',
                   border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text)',
                   borderBottom: '1px solid var(--border)',
                 }}
@@ -209,52 +224,61 @@ function InternationalClubs() {
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">🏉</div>
-          <p>{teams.length === 0 ? 'Sin datos para esta liga.' : `Sin equipos para "${query}"`}</p>
+          <p>{teams.length === 0 ? 'Sin datos para esta liga en este momento.' : `Sin equipos para "${query}"`}</p>
         </div>
       ) : (
         <div className="clubs-grid">
-          {filtered.map(t => (
-            <div key={t.id} className="club-card">
-              <div className="club-card-header">
-                {t.logo ? (
-                  <img src={t.logo} alt={t.name}
-                    style={{ width: 52, height: 52, objectFit: 'contain' }}
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                ) : (
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 8, background: 'var(--accent)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 16, fontWeight: 700, color: '#fff',
-                  }}>
-                    {t.name.split(' ').map(w => w[0]).slice(0, 2).join('')}
+          {filtered.map(t => {
+            const played = leagueMatches.filter(m => m.homeId === t.id || m.awayId === t.id).length;
+            const won    = leagueMatches.filter(m =>
+              m.status === 'finished' && (
+                (m.homeId === t.id && (m.homeScore ?? 0) > (m.awayScore ?? 0)) ||
+                (m.awayId === t.id && (m.awayScore ?? 0) > (m.homeScore ?? 0))
+              )
+            ).length;
+            return (
+              <div key={t.id} className="club-card">
+                <div className="club-card-header">
+                  {t.logo ? (
+                    <img src={t.logo} alt={t.name}
+                      style={{ width: 52, height: 52, objectFit: 'contain' }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  ) : (
+                    <div style={{
+                      width: 52, height: 52, borderRadius: 8, background: 'var(--accent)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16, fontWeight: 700, color: '#fff',
+                    }}>
+                      {t.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('')}
+                    </div>
+                  )}
+                  <div>
+                    <div className="club-name">{t.name}</div>
+                    <div className="club-location">
+                      <Globe size={11} /> {selectedLeague.name}
+                    </div>
                   </div>
-                )}
-                <div>
-                  <div className="club-name">{t.name}</div>
-                  <div className="club-location">
-                    <MapPin size={11} /> {t.country}
+                </div>
+
+                <div className="club-stats-row">
+                  <div className="club-stat">
+                    <div className="club-stat-value">{played}</div>
+                    <div className="club-stat-label">Partidos</div>
+                  </div>
+                  <div className="club-stat">
+                    <div className="club-stat-value">{won}</div>
+                    <div className="club-stat-label">Victorias</div>
                   </div>
                 </div>
-              </div>
 
-              <div className="club-stats-row">
-                <div className="club-stat">
-                  <div className="club-stat-value">{selectedLeague.name.split(' ')[0]}</div>
-                  <div className="club-stat-label">Liga</div>
-                </div>
-                <div className="club-stat">
-                  <div className="club-stat-value">{DEFAULT_SEASON}</div>
-                  <div className="club-stat-label">Temporada</div>
+                <div className="club-card-footer">
+                  <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => setSelectedTeam(t)}>
+                    Ver partidos
+                  </button>
                 </div>
               </div>
-
-              <div className="club-card-footer">
-                <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => openTeam(t)}>
-                  Ver partidos
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

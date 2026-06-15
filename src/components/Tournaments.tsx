@@ -1,9 +1,28 @@
 import { useState, Fragment, useEffect } from 'react';
 import { ChevronRight, ChevronLeft, Trophy, Globe, MapPin, Users, ArrowLeft, Loader } from 'lucide-react';
 import { tournamentTree, TournamentNode, matches } from '../data/mockData';
-import { rugbyApi, NormalisedLeague, NormalisedStanding } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
 
 type Tab = 'local' | 'international';
+
+type IntlTournament = { id: number; name: string; country: string; type: string; };
+
+const INTL_TOURNAMENTS: IntlTournament[] = [
+  { id: ESPN_LEAGUES.SIX_NATIONS,         name: 'Six Nations',               country: 'Europa',     type: 'Selecciones' },
+  { id: ESPN_LEAGUES.RUGBY_CHAMPIONSHIP,  name: 'Rugby Championship',        country: 'Mundo',      type: 'Selecciones' },
+  { id: ESPN_LEAGUES.INTERNATIONAL_TESTS, name: 'International Tests',       country: 'Mundial',    type: 'Selecciones' },
+  { id: ESPN_LEAGUES.WORLD_CUP,           name: 'Rugby World Cup',           country: 'Mundial',    type: 'Selecciones' },
+  { id: ESPN_LEAGUES.PREMIERSHIP,         name: 'Premiership Rugby',         country: 'Inglaterra', type: 'Clubes' },
+  { id: ESPN_LEAGUES.TOP_14,              name: 'Top 14',                    country: 'Francia',    type: 'Clubes' },
+  { id: ESPN_LEAGUES.URC,                 name: 'United Rugby Championship', country: 'Mundo',      type: 'Clubes' },
+  { id: ESPN_LEAGUES.SUPER_RUGBY_PACIFIC, name: 'Super Rugby Pacific',       country: 'Pacífico',   type: 'Clubes' },
+  { id: ESPN_LEAGUES.CHAMPIONS_CUP,       name: 'Champions Cup',             country: 'Europa',     type: 'Clubes' },
+  { id: ESPN_LEAGUES.MAJOR_LEAGUE_RUGBY,  name: 'Major League Rugby',        country: 'EE.UU.',     type: 'Clubes' },
+  { id: ESPN_LEAGUES.CURRIE_CUP,          name: 'Currie Cup',                country: 'Sudáfrica',  type: 'Clubes' },
+  { id: ESPN_LEAGUES.URBA_PRIMERA_A,      name: 'URBA Primera A',            country: 'Argentina',  type: 'Clubes' },
+  { id: ESPN_LEAGUES.URBA_TOP_14_ARG,     name: 'URBA Top 14',              country: 'Argentina',  type: 'Clubes' },
+];
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   active:   { label: 'Activo',     cls: 'tag-green' },
@@ -21,154 +40,134 @@ function countActive(node: TournamentNode): number {
   return (node.children ?? []).reduce((s, c) => s + countActive(c), 0);
 }
 
-// ── Standings table ────────────────────────────────────────────────────────────
+// ── Match row used in league detail ───────────────────────────────────────────
 
-function StandingsTable({ standings }: { standings: NormalisedStanding[] }) {
+function MatchRow({ m }: { m: NormalisedMatch }) {
   return (
-    <table className="data-table" style={{ marginTop: 0 }}>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Equipo</th>
-          <th>PJ</th>
-          <th>G</th>
-          <th>E</th>
-          <th>P</th>
-          <th>Pts</th>
-          <th style={{ textAlign: 'right' }}>Dif</th>
-        </tr>
-      </thead>
-      <tbody>
-        {standings.map(s => (
-          <tr key={s.teamId}>
-            <td>
-              <strong style={{ color: s.position <= 3 ? 'var(--gold)' : 'var(--text-2)' }}>
-                {s.position}
-              </strong>
-            </td>
-            <td>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                {s.teamLogo && (
-                  <img
-                    src={s.teamLogo} alt={s.teamName}
-                    style={{ width: 20, height: 20, objectFit: 'contain' }}
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                )}
-                <span style={{ fontWeight: 600 }}>{s.teamName}</span>
-              </div>
-            </td>
-            <td>{s.played}</td>
-            <td>{s.won}</td>
-            <td>{s.drawn}</td>
-            <td>{s.lost}</td>
-            <td><strong style={{ color: 'var(--accent)' }}>{s.points}</strong></td>
-            <td style={{ textAlign: 'right', color: s.diff >= 0 ? 'var(--accent)' : 'var(--live)', fontWeight: 600 }}>
-              {s.diff >= 0 ? '+' : ''}{s.diff}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13,
+    }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          {m.homeLogo && (
+            <img src={m.homeLogo} alt="" style={{ width: 18, height: 18, objectFit: 'contain' }}
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          )}
+          {m.home}
+          <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>vs</span>
+          {m.awayLogo && (
+            <img src={m.awayLogo} alt="" style={{ width: 18, height: 18, objectFit: 'contain' }}
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          )}
+          {m.away}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>
+          {m.date} {m.round ? `· ${m.round}` : ''}
+        </div>
+      </div>
+      <span className={`status-badge ${m.status}`} style={{ fontSize: 10 }}>
+        {m.status === 'finished'
+          ? `${m.homeScore ?? '-'} – ${m.awayScore ?? '-'}`
+          : m.status === 'live' ? (m.minute ?? 'En vivo')
+          : m.time}
+      </span>
+    </div>
+  );
+}
+
+function MatchSection({ title, ms, titleColor }: { title: string; ms: NormalisedMatch[]; titleColor?: string }) {
+  return (
+    <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 13, color: titleColor }}>
+        {title}
+      </div>
+      {ms.map(m => <MatchRow key={m.id} m={m} />)}
+    </div>
   );
 }
 
 // ── International leagues view ─────────────────────────────────────────────────
 
 function InternationalView() {
-  const [leagues,   setLeagues]   = useState<NormalisedLeague[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [selected,  setSelected]  = useState<NormalisedLeague | null>(null);
-  const [standings, setStandings] = useState<NormalisedStanding[]>([]);
-  const [loadSt,    setLoadSt]    = useState(false);
+  const [selected,      setSelected]      = useState<IntlTournament | null>(null);
+  const [leagueMatches, setLeagueMatches] = useState<NormalisedMatch[]>([]);
+  const [logo,          setLogo]          = useState('');
+  const [loading,       setLoading]       = useState(false);
 
-  useEffect(() => {
-    rugbyApi.getLeagues()
-      .then(data => setLeagues(data))
-      .catch(() => {/* silent */})
+  const openLeague = (t: IntlTournament) => {
+    setSelected(t);
+    setLeagueMatches([]);
+    setLogo('');
+    setLoading(true);
+    espnApi.getLeagueGames(t.id)
+      .then(ms => {
+        setLeagueMatches(ms);
+        const first = ms.find(m => m.tournamentLogo);
+        if (first?.tournamentLogo) setLogo(first.tournamentLogo);
+      })
+      .catch(() => setLeagueMatches([]))
       .finally(() => setLoading(false));
-  }, []);
-
-  const openLeague = (league: NormalisedLeague) => {
-    setSelected(league);
-    setStandings([]);
-    setLoadSt(true);
-    rugbyApi.getStandings(league.id, Number(league.currentSeason) || 2025)
-      .then(data => setStandings(data))
-      .catch(() => setStandings([]))
-      .finally(() => setLoadSt(false));
   };
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '40px 20px', color: 'var(--text-3)' }}>
-        <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} />
-        Cargando ligas…
-      </div>
-    );
-  }
-
-  if (leagues.length === 0) {
-    return (
-      <div className="empty-state">
-        <div className="empty-state-icon">🏆</div>
-        <p>No se pudieron cargar las ligas. Verificá tu RUGBY_API_KEY.</p>
-      </div>
-    );
-  }
-
-  // Detail view for a selected league
+  // Detail view for selected league
   if (selected) {
+    const live     = leagueMatches.filter(m => m.status === 'live');
+    const upcoming = leagueMatches.filter(m => m.status === 'upcoming').sort((a, b) => a.date.localeCompare(b.date));
+    const finished = leagueMatches.filter(m => m.status === 'finished').sort((a, b) => b.date.localeCompare(a.date));
+
     return (
       <div>
         <button
           className="tourney-back-btn"
           style={{ marginBottom: 16 }}
-          onClick={() => { setSelected(null); setStandings([]); }}
+          onClick={() => { setSelected(null); setLeagueMatches([]); }}
         >
           <ArrowLeft size={14} /> Todas las ligas
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          {selected.logo && (
-            <img src={selected.logo} alt={selected.name} style={{ width: 44, height: 44, objectFit: 'contain' }}
+          {logo && (
+            <img src={logo} alt={selected.name} style={{ width: 44, height: 44, objectFit: 'contain' }}
               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           )}
           <div>
             <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{selected.name}</div>
             <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-              {selected.country} · {selected.type} · Temporada {selected.currentSeason}
+              {selected.country} · {selected.type}
             </div>
           </div>
         </div>
 
-        {loadSt ? (
+        {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', padding: '20px 0' }}>
             <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
-            Cargando tabla de posiciones…
+            Cargando partidos…
           </div>
-        ) : standings.length > 0 ? (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 13 }}>
-              Tabla de posiciones
-            </div>
-            <div style={{ padding: '0 4px 4px' }}>
-              <StandingsTable standings={standings} />
-            </div>
-          </div>
+        ) : leagueMatches.length === 0 ? (
+          <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin partidos disponibles para esta liga en este momento.</p>
         ) : (
-          <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin tabla de posiciones disponible para esta liga.</p>
+          <>
+            {live.length > 0 && (
+              <MatchSection title="En vivo" ms={live} titleColor="var(--live)" />
+            )}
+            {upcoming.length > 0 && (
+              <MatchSection title="Próximos partidos" ms={upcoming.slice(0, 12)} />
+            )}
+            {finished.length > 0 && (
+              <MatchSection title="Últimos resultados" ms={finished.slice(0, 12)} />
+            )}
+          </>
         )}
       </div>
     );
   }
 
-  // Group by type
-  const grouped: Record<string, NormalisedLeague[]> = {};
-  for (const l of leagues) {
-    const key = l.type || 'Other';
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(l);
+  // Group leagues by type
+  const grouped: Record<string, IntlTournament[]> = {};
+  for (const t of INTL_TOURNAMENTS) {
+    if (!grouped[t.type]) grouped[t.type] = [];
+    grouped[t.type].push(t);
   }
 
   return (
@@ -179,18 +178,14 @@ function InternationalView() {
             {type}
           </div>
           <div className="tournaments-list">
-            {list.map(l => (
-              <button key={l.id} className="tournament-card" style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }} onClick={() => openLeague(l)}>
+            {list.map(t => (
+              <button key={t.id} className="tournament-card" style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }} onClick={() => openLeague(t)}>
                 <div className="tournament-icon" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {l.logo
-                    ? <img src={l.logo} alt={l.name} style={{ width: 28, height: 28, objectFit: 'contain' }}
-                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                    : <Trophy size={18} color="var(--accent)" />
-                  }
+                  <Trophy size={18} color="var(--accent)" />
                 </div>
                 <div className="tournament-info">
-                  <div className="tournament-name">{l.name}</div>
-                  <div className="tournament-meta">{l.country} · Temporada {l.currentSeason}</div>
+                  <div className="tournament-name">{t.name}</div>
+                  <div className="tournament-meta">{t.country}</div>
                 </div>
                 <div className="tournament-card-right">
                   <ChevronRight size={15} color="var(--text-3)" />
@@ -379,7 +374,7 @@ export default function Tournaments() {
         </button>
       </div>
 
-      {tab === 'local'         ? <LocalTree />         : <InternationalView />}
+      {tab === 'local' ? <LocalTree /> : <InternationalView />}
     </div>
   );
 }

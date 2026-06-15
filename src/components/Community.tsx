@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Heart, MessageCircle, Repeat2, BarChart2, Image, X, Send, PlusCircle, TrendingUp, Activity, Calendar } from 'lucide-react';
-import { useAuth } from '../app/main';
+import { useAuth, useLive } from '../app/main';
 import { initialPosts, SocialPost, PostComment, Poll } from '../data/mockData';
-import { rugbyApi, NormalisedMatch } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi } from '../services/espnApi';
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
@@ -356,24 +357,19 @@ function PostComposer({ onPost }: {
 // ─── Live scores sidebar ──────────────────────────────────────────────────────
 
 function LiveScoresSidebar() {
-  const [todayGames, setTodayGames]     = useState<NormalisedMatch[]>([]);
-  const [upcoming,   setUpcoming]       = useState<NormalisedMatch[]>([]);
-  const [loading,    setLoading]        = useState(true);
+  const { todayMatches } = useLive();
+  const [upcoming, setUpcoming] = useState<NormalisedMatch[]>([]);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(true);
 
   useEffect(() => {
-    Promise.allSettled([
-      rugbyApi.getTodayGames(),
-      rugbyApi.getUpcomingGames(3),
-    ]).then(([todayRes, upcomingRes]) => {
-      const today    = todayRes.status    === 'fulfilled' ? todayRes.value    : [];
-      const upcoming = upcomingRes.status === 'fulfilled' ? upcomingRes.value : [];
-      setTodayGames(today);
-      setUpcoming(upcoming.filter(m => m.status === 'upcoming').slice(0, 5));
-    }).finally(() => setLoading(false));
+    espnApi.getUpcomingGames(3)
+      .then(ms => setUpcoming(ms.filter(m => m.status === 'upcoming').slice(0, 5)))
+      .catch(() => setUpcoming([]))
+      .finally(() => setLoadingUpcoming(false));
   }, []);
 
-  const live     = todayGames.filter(m => m.status === 'live');
-  const finished = todayGames.filter(m => m.status === 'finished');
+  const live     = todayMatches.filter(m => m.status === 'live');
+  const finished = todayMatches.filter(m => m.status === 'finished');
 
   const ScoreRow = ({ m }: { m: NormalisedMatch }) => (
     <div style={{
@@ -412,7 +408,7 @@ function LiveScoresSidebar() {
     </div>
   );
 
-  if (loading) {
+  if (todayMatches.length === 0 && loadingUpcoming) {
     return (
       <div className="card">
         <div className="card-header"><span className="card-title">Partidos de hoy</span></div>
@@ -465,7 +461,7 @@ function LiveScoresSidebar() {
         </div>
       )}
 
-      {live.length === 0 && finished.length === 0 && upcoming.length === 0 && (
+      {live.length === 0 && finished.length === 0 && upcoming.length === 0 && !loadingUpcoming && (
         <div className="card">
           <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
             Sin partidos hoy
