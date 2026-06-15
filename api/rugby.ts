@@ -5,6 +5,8 @@
 
 export const config = { runtime: 'edge' };
 
+declare const process: { env: Record<string, string | undefined> };
+
 const BASE = 'https://v1.rugby.api-sports.io';
 const CACHE: Record<string, { data: unknown; ts: number }> = {};
 const TTL = 30_000;
