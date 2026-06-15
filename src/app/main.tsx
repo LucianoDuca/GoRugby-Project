@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import { createRoot } from 'react-dom/client';
 import '../styles/styles.css';
 import { seedUsers, User } from '../data/mockData';
-import { rugbyApi, NormalisedMatch } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi } from '../services/espnApi';
 import Auth from '../components/Auth';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
@@ -106,7 +107,7 @@ function App() {
   useEffect(() => {
     if (!user) return;
     const doFetch = () =>
-      rugbyApi.getTodayGames()
+      espnApi.getTodayGames()
         .then(d => { setTodayMatches(d); setApiOnline(true); })
         .catch(() => setApiOnline(false));
     doFetch();

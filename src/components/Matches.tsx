@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Filter, X, ChevronDown, RefreshCw, Wifi, WifiOff, List, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { rugbyApi, NormalisedMatch, LEAGUES } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
 import MatchModal from './MatchModal';
 
 type StatusFilter = 'all' | 'live' | 'upcoming' | 'finished';
@@ -11,17 +12,6 @@ const STATUS_TABS: { id: StatusFilter; label: string }[] = [
   { id: 'upcoming', label: 'Próximos' },
   { id: 'finished', label: 'Finalizados' },
 ];
-
-const DEFAULT_LEAGUES = [
-  LEAGUES.SIX_NATIONS,
-  LEAGUES.RUGBY_CHAMPIONSHIP,
-  LEAGUES.PREMIERSHIP,
-  LEAGUES.TOP_14,
-  LEAGUES.URC,
-  LEAGUES.SUPER_RUGBY,
-  LEAGUES.TOP_12_ARG,
-];
-const DEFAULT_SEASON = 2024;
 
 const WEEKDAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const MONTHS   = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -280,24 +270,25 @@ export default function Matches() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [todayResult, ...leagueResults] = await Promise.allSettled([
-        rugbyApi.getTodayGames(),
-        ...DEFAULT_LEAGUES.map(id => rugbyApi.getFixtures(id, DEFAULT_SEASON)),
+      // ESPN: one call per league — no rate limits, no API key needed
+      const results = await Promise.allSettled([
+        espnApi.getTodayGames(),
+        ...Object.values(ESPN_LEAGUES).map(id => espnApi.getLeagueGames(id)),
       ]);
 
-      const today = todayResult.status === 'fulfilled' ? todayResult.value : [];
-      const byLeague = leagueResults
+      const all = results
         .filter((r): r is PromiseFulfilledResult<NormalisedMatch[]> => r.status === 'fulfilled')
         .flatMap(r => r.value);
 
-      const todayIds = new Set(today.map(m => m.id));
-      const merged   = [...today, ...byLeague.filter(m => !todayIds.has(m.id))];
-
       const seen   = new Set<number>();
-      const unique = merged.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+      const unique = all.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
 
-      setMatches(unique);
-      setApiOnline(true);
+      if (unique.length > 0) {
+        setMatches(unique);
+        setApiOnline(true);
+      } else {
+        setApiOnline(false);
+      }
       setLastUpdated(new Date());
     } catch {
       if (matches.length === 0) setApiOnline(false);
@@ -308,16 +299,16 @@ export default function Matches() {
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(fetchAll, 5 * 60_000);
+    const id = setInterval(fetchAll, 60_000); // 1 min — ESPN has no rate limit
     return () => clearInterval(id);
   }, [fetchAll]);
 
   useEffect(() => {
     if (status !== 'upcoming' || upcomingLoaded || loadingUpcoming) return;
     setLoadingUpcoming(true);
-    rugbyApi.getUpcomingGames(5).then(upcoming => {
+    espnApi.getUpcomingGames(7).then(upcoming => {
       setMatches(prev => {
-        const seen  = new Set(prev.map(m => m.id));
+        const seen = new Set(prev.map(m => m.id));
         const fresh = upcoming.filter(m => !seen.has(m.id));
         return [...prev, ...fresh];
       });

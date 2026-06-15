@@ -5,7 +5,8 @@ import { matches as mockMatches } from '../data/mockData';
 import { Section } from '../app/main';
 import { ClubBadge } from './ClubLogo';
 import { useAuth } from '../app/main';
-import { rugbyApi, NormalisedMatch, LEAGUES } from '../services/rugbyApi';
+import { NormalisedMatch } from '../services/rugbyApi';
+import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
 
 interface Props { setSection: (s: Section) => void; }
 
@@ -86,25 +87,22 @@ export default function Home({ setSection }: Props) {
 
   useEffect(() => {
     Promise.allSettled([
-      rugbyApi.getTodayGames(),
-      rugbyApi.getFixtures(LEAGUES.SIX_NATIONS, 2024),
-      rugbyApi.getFixtures(LEAGUES.RUGBY_CHAMPIONSHIP, 2024),
-      rugbyApi.getFixtures(LEAGUES.TOP_12_ARG, 2024),
-    ]).then(([today, sn, rc, arg]) => {
-      const todayMs = today.status === 'fulfilled' ? today.value : [];
-      const rest    = [sn, rc, arg]
+      espnApi.getTodayGames(),
+      espnApi.getLeagueGames(ESPN_LEAGUES.SIX_NATIONS,         undefined, undefined),
+      espnApi.getLeagueGames(ESPN_LEAGUES.RUGBY_CHAMPIONSHIP,  undefined, undefined),
+      espnApi.getUpcomingGames(3),
+    ]).then(results => {
+      const all = results
         .filter((r): r is PromiseFulfilledResult<NormalisedMatch[]> => r.status === 'fulfilled')
-        .flatMap(r => r.value.filter(m => m.status !== 'finished').slice(0, 6));
-
-      const todayIds = new Set(todayMs.map(m => m.id));
-      const merged   = [...todayMs, ...rest.filter(m => !todayIds.has(m.id))];
+        .flatMap(r => r.value);
 
       const seen = new Set<number>();
-      const unique = merged
+      const unique = all
         .filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
         .sort((a, b) => {
           if (a.status === 'live'     && b.status !== 'live')     return -1;
           if (b.status === 'live'     && a.status !== 'live')     return 1;
+          if (a.status === 'upcoming' && b.status !== 'upcoming') return -1;
           return a.date.localeCompare(b.date);
         });
 
