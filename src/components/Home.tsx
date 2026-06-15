@@ -86,18 +86,18 @@ export default function Home({ setSection }: Props) {
 
   useEffect(() => {
     Promise.allSettled([
-      rugbyApi.getLiveFixtures(),
-      rugbyApi.getFixtures(LEAGUES.SIX_NATIONS, 2025),
-      rugbyApi.getFixtures(LEAGUES.RUGBY_CHAMPIONSHIP, 2025),
-      rugbyApi.getFixtures(LEAGUES.SUPER_RUGBY, 2025),
-    ]).then(([live, sn, rc, sr]) => {
-      const liveMs = live.status === 'fulfilled' ? live.value : [];
-      const rest   = [sn, rc, sr]
+      rugbyApi.getTodayGames(),
+      rugbyApi.getFixtures(LEAGUES.SIX_NATIONS, 2024),
+      rugbyApi.getFixtures(LEAGUES.RUGBY_CHAMPIONSHIP, 2024),
+      rugbyApi.getFixtures(LEAGUES.TOP_12_ARG, 2024),
+    ]).then(([today, sn, rc, arg]) => {
+      const todayMs = today.status === 'fulfilled' ? today.value : [];
+      const rest    = [sn, rc, arg]
         .filter((r): r is PromiseFulfilledResult<NormalisedMatch[]> => r.status === 'fulfilled')
         .flatMap(r => r.value.filter(m => m.status !== 'finished').slice(0, 6));
 
-      const liveIds = new Set(liveMs.map(m => m.id));
-      const merged  = [...liveMs, ...rest.filter(m => !liveIds.has(m.id))];
+      const todayIds = new Set(todayMs.map(m => m.id));
+      const merged   = [...todayMs, ...rest.filter(m => !todayIds.has(m.id))];
 
       const seen = new Set<number>();
       const unique = merged

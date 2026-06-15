@@ -11,6 +11,8 @@ const STATUS_TABS: { id: StatusFilter; label: string }[] = [
   { id: 'finished', label: 'Finalizados' },
 ];
 
+// Free plan allows season 2022–2024 for league+season queries.
+// Today's games use ?date= (no season restriction).
 const DEFAULT_LEAGUES = [
   LEAGUES.SIX_NATIONS,
   LEAGUES.RUGBY_CHAMPIONSHIP,
@@ -18,7 +20,9 @@ const DEFAULT_LEAGUES = [
   LEAGUES.TOP_14,
   LEAGUES.URC,
   LEAGUES.SUPER_RUGBY,
+  LEAGUES.TOP_12_ARG,
 ];
+const DEFAULT_SEASON = 2024;
 
 function uniqueMonths(list: NormalisedMatch[]): string[] {
   return Array.from(new Set(list.map(m => m.date.slice(0, 7)))).sort().reverse();
@@ -157,18 +161,19 @@ export default function Matches() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [liveResult, ...leagueResults] = await Promise.allSettled([
-        rugbyApi.getLiveFixtures(),
-        ...DEFAULT_LEAGUES.map(id => rugbyApi.getFixtures(id, 2025)),
+      const [todayResult, ...leagueResults] = await Promise.allSettled([
+        rugbyApi.getTodayGames(),
+        ...DEFAULT_LEAGUES.map(id => rugbyApi.getFixtures(id, DEFAULT_SEASON)),
       ]);
 
-      const live = liveResult.status === 'fulfilled' ? liveResult.value : [];
+      const today = todayResult.status === 'fulfilled' ? todayResult.value : [];
       const byLeague = leagueResults
         .filter((r): r is PromiseFulfilledResult<NormalisedMatch[]> => r.status === 'fulfilled')
         .flatMap(r => r.value);
 
-      const liveIds = new Set(live.map(m => m.id));
-      const merged  = [...live, ...byLeague.filter(m => !liveIds.has(m.id))];
+      // Today's games take priority (they're real-time)
+      const todayIds = new Set(today.map(m => m.id));
+      const merged   = [...today, ...byLeague.filter(m => !todayIds.has(m.id))];
 
       const seen  = new Set<number>();
       const unique = merged.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
@@ -185,7 +190,7 @@ export default function Matches() {
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(fetchAll, 60_000);
+    const id = setInterval(fetchAll, 5 * 60_000); // 5 min — free plan: 100 req/day
     return () => clearInterval(id);
   }, [fetchAll]);
 

@@ -4,39 +4,50 @@
 
 const BASE = '/api/rugby';
 
-// ── Raw API types ─────────────────────────────────────────────────────────────
+// ── Raw API types (verified against actual v1.rugby.api-sports.io responses) ─
 
 interface ApiResponse<T> {
   results: number;
   response: T[];
-  errors?: Record<string, string>;
+  errors?: Record<string, string> | unknown[];
 }
 
-export interface ApiFixture {
+export interface ApiGame {
   id: number;
-  date: string;
-  time: string;
+  date: string;          // "2024-04-06T18:30:00+00:00"
+  time: string;          // "18:30"
+  timestamp: number;
   timezone: string;
   week: string | null;
   status: {
     long: string;
-    short: 'NS' | '1H' | 'HT' | '2H' | 'ET' | 'FT' | 'AOT' | 'AP' | 'CANC' | 'PST' | string;
-    timer: number | null;
+    short: 'NS' | '1H' | 'HT' | '2H' | 'ET' | 'BT' | 'P' | 'INT' | 'FT' | 'AOT' | 'AP' | 'AET' | 'AWD' | 'WO' | 'CANC' | 'PST' | string;
+    timer?: number | null;
+  };
+  country: {
+    id: number;
+    name: string;
+    code: string | null;
+    flag: string | null;
   };
   league: {
     id: number;
     name: string;
+    type: string;
     logo: string;
-    season: string;
-    round: string | null;
-    country: { name: string; code: string | null; flag: string | null };
+    season: number;
   };
   teams: {
     home: { id: number; name: string; logo: string };
     away: { id: number; name: string; logo: string };
   };
   scores: { home: number | null; away: number | null };
-  periods: { first: number | null; second: number | null };
+  periods: {
+    first:           { home: number | null; away: number | null };
+    second:          { home: number | null; away: number | null };
+    overtime:        { home: number | null; away: number | null };
+    second_overtime: { home: number | null; away: number | null };
+  };
 }
 
 export interface ApiLeague {
@@ -45,7 +56,7 @@ export interface ApiLeague {
   type: string;
   logo: string;
   country: { name: string; code: string | null; flag: string | null };
-  seasons: { season: string | number }[];
+  seasons: { season: number; current: boolean; start: string; end: string }[];
 }
 
 export interface ApiTeam {
@@ -127,104 +138,100 @@ export interface NormalisedStanding {
 
 // ── Status mapping ────────────────────────────────────────────────────────────
 
-const LIVE_STATUSES = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT']);
+const LIVE_STATUSES     = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT']);
 const FINISHED_STATUSES = new Set(['FT', 'AOT', 'AP', 'AET', 'AWD', 'WO']);
 
 function mapStatus(short: string): MatchStatus {
-  if (LIVE_STATUSES.has(short)) return 'live';
+  if (LIVE_STATUSES.has(short))     return 'live';
   if (FINISHED_STATUSES.has(short)) return 'finished';
   return 'upcoming';
 }
 
-function minuteLabel(fixture: ApiFixture): string | undefined {
-  const s = fixture.status;
-  if (s.short === 'HT') return 'MT';
-  if (s.timer != null) return `${s.timer}'`;
+function minuteLabel(g: ApiGame): string | undefined {
+  if (g.status.short === 'HT') return 'MT';
+  if (g.status.timer != null)  return `${g.status.timer}'`;
   return undefined;
+}
+
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // ── Normalisers ───────────────────────────────────────────────────────────────
 
-export function normaliseFixture(f: ApiFixture): NormalisedMatch {
-  const datePart = f.date.split('T')[0];
-  const timePart = f.time ?? f.date.split('T')[1]?.slice(0, 5) ?? '';
-  const status = mapStatus(f.status.short);
+export function normaliseGame(g: ApiGame): NormalisedMatch {
+  const datePart = g.date.split('T')[0];
+  const status   = mapStatus(g.status.short);
   return {
-    id: f.id,
-    home: f.teams.home.name,
-    homeId: String(f.teams.home.id),
-    homeLogo: f.teams.home.logo,
-    away: f.teams.away.name,
-    awayId: String(f.teams.away.id),
-    awayLogo: f.teams.away.logo,
-    homeScore: f.scores.home ?? undefined,
-    awayScore: f.scores.away ?? undefined,
+    id:             g.id,
+    home:           g.teams.home.name,
+    homeId:         String(g.teams.home.id),
+    homeLogo:       g.teams.home.logo,
+    away:           g.teams.away.name,
+    awayId:         String(g.teams.away.id),
+    awayLogo:       g.teams.away.logo,
+    homeScore:      g.scores.home ?? undefined,
+    awayScore:      g.scores.away ?? undefined,
     status,
-    minute: status === 'live' ? minuteLabel(f) : undefined,
-    date: datePart,
-    time: timePart,
-    tournament: f.league.name,
-    tournamentId: f.league.id,
-    tournamentLogo: f.league.logo,
-    country: f.league.country.name,
-    season: f.league.season,
-    round: f.league.round ?? undefined,
+    minute:         status === 'live' ? minuteLabel(g) : undefined,
+    date:           datePart,
+    time:           g.time,
+    tournament:     g.league.name,
+    tournamentId:   g.league.id,
+    tournamentLogo: g.league.logo,
+    country:        g.country.name,
+    season:         String(g.league.season),
+    round:          g.week ?? undefined,
   };
 }
 
 function normaliseLeague(l: ApiLeague): NormalisedLeague {
-  const seasons = l.seasons ?? [];
-  const current = seasons[seasons.length - 1]?.season ?? '';
+  const current = l.seasons?.find(s => s.current) ?? l.seasons?.[l.seasons.length - 1];
   return {
-    id: l.id,
-    name: l.name,
-    logo: l.logo,
-    country: l.country.name,
-    countryFlag: l.country.flag,
-    type: l.type,
-    currentSeason: String(current),
+    id:            l.id,
+    name:          l.name,
+    logo:          l.logo,
+    country:       l.country.name,
+    countryFlag:   l.country.flag,
+    type:          l.type,
+    currentSeason: String(current?.season ?? ''),
   };
 }
 
 function normaliseTeam(t: ApiTeam): NormalisedTeam {
-  return {
-    id: t.id,
-    name: t.name,
-    logo: t.logo,
-    country: t.country.name,
-  };
+  return { id: t.id, name: t.name, logo: t.logo, country: t.country.name };
 }
 
 function normaliseStanding(s: ApiStanding): NormalisedStanding {
-  const pf = s['points-for'] ?? 0;
-  const pa = s['points-against'] ?? 0;
+  const pf = s['points-for']      ?? 0;
+  const pa = s['points-against']  ?? 0;
   return {
-    position: s.position,
-    teamId: s.team.id,
-    teamName: s.team.name,
-    teamLogo: s.team.logo,
-    points: s.points,
-    played: s.played,
-    won: s.won,
-    lost: s.lost,
-    drawn: s.drawn,
-    pointsFor: pf,
+    position:      s.position,
+    teamId:        s.team.id,
+    teamName:      s.team.name,
+    teamLogo:      s.team.logo,
+    points:        s.points,
+    played:        s.played,
+    won:           s.won,
+    lost:          s.lost,
+    drawn:         s.drawn,
+    pointsFor:     pf,
     pointsAgainst: pa,
-    diff: pf - pa,
+    diff:          pf - pa,
   };
 }
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
 async function get<T>(path: string, params: Record<string, string | number> = {}): Promise<T[]> {
-  const qs = new URLSearchParams(
+  const qs  = new URLSearchParams(
     Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
   ).toString();
   const url = `${BASE}/${path}${qs ? `?${qs}` : ''}`;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body: ApiResponse<T> = await res.json();
-  if (body.errors && Object.keys(body.errors).length > 0) {
+  if (body.errors && !Array.isArray(body.errors) && Object.keys(body.errors).length > 0) {
     throw new Error(JSON.stringify(body.errors));
   }
   return body.response ?? [];
@@ -233,19 +240,20 @@ async function get<T>(path: string, params: Record<string, string | number> = {}
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const rugbyApi = {
-  /** All live fixtures right now */
+  /** Live and today's games (fetches by date, filters live status client-side) */
   getLiveFixtures(): Promise<NormalisedMatch[]> {
-    return get<ApiFixture>('fixtures', { live: 'all' }).then(r => r.map(normaliseFixture));
+    return get<ApiGame>('games', { date: todayUTC() })
+      .then(r => r.map(normaliseGame).filter(m => m.status === 'live'));
   },
 
-  /** Fixtures by league + season (defaults to 2025) */
-  getFixtures(leagueId: number, season = 2025): Promise<NormalisedMatch[]> {
-    return get<ApiFixture>('fixtures', { league: leagueId, season }).then(r => r.map(normaliseFixture));
+  /** Today's games (all statuses) */
+  getTodayGames(): Promise<NormalisedMatch[]> {
+    return get<ApiGame>('games', { date: todayUTC() }).then(r => r.map(normaliseGame));
   },
 
-  /** Upcoming fixtures (next N days) for all major leagues */
-  getUpcomingFixtures(leagueId: number, season = 2025, next = 20): Promise<NormalisedMatch[]> {
-    return get<ApiFixture>('fixtures', { league: leagueId, season, next }).then(r => r.map(normaliseFixture));
+  /** All games for a league + season */
+  getFixtures(leagueId: number, season: number): Promise<NormalisedMatch[]> {
+    return get<ApiGame>('games', { league: leagueId, season }).then(r => r.map(normaliseGame));
   },
 
   /** All available leagues */
@@ -253,33 +261,29 @@ export const rugbyApi = {
     return get<ApiLeague>('leagues').then(r => r.map(normaliseLeague));
   },
 
-  /** Leagues for a specific country */
-  getLeaguesByCountry(country: string): Promise<NormalisedLeague[]> {
-    return get<ApiLeague>('leagues', { country }).then(r => r.map(normaliseLeague));
-  },
-
   /** Teams in a league */
-  getTeams(leagueId: number, season = 2025): Promise<NormalisedTeam[]> {
+  getTeams(leagueId: number, season: number): Promise<NormalisedTeam[]> {
     return get<ApiTeam>('teams', { league: leagueId, season }).then(r => r.map(normaliseTeam));
   },
 
   /** Standings for a league */
-  getStandings(leagueId: number, season = 2025): Promise<NormalisedStanding[]> {
+  getStandings(leagueId: number, season: number): Promise<NormalisedStanding[]> {
     return get<ApiStanding>('standings', { league: leagueId, season }).then(r => r.map(normaliseStanding));
   },
 };
 
-// ── Well-known league IDs (api-sports.io) ────────────────────────────────────
+// ── Well-known league IDs (verified from api-sports.io /leagues endpoint) ────
 
 export const LEAGUES = {
-  SIX_NATIONS:          4,
-  RUGBY_CHAMPIONSHIP:   5,
-  WORLD_CUP:            6,
-  PREMIERSHIP:          2,
-  TOP_14:               3,
-  URC:                  7,
-  SUPER_RUGBY:          8,
-  WORLD_RUGBY_SEVENS:  15,
+  SIX_NATIONS:        51,   // Europe
+  RUGBY_CHAMPIONSHIP: 85,   // World
+  WORLD_CUP:          69,   // World
+  PREMIERSHIP:        13,   // England
+  TOP_14:             16,   // France
+  URC:                76,   // United Rugby Championship
+  SUPER_RUGBY:        71,   // World
+  AMERICAS:          100,   // Americas Championship
+  TOP_12_ARG:          1,   // Argentina Top 12
 } as const;
 
 export type LeagueId = typeof LEAGUES[keyof typeof LEAGUES];
