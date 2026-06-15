@@ -30,7 +30,8 @@ export default async function handler(request: Request): Promise<Response> {
   // Build upstream URL: strip _e, keep all other query params
   const fwd = new URLSearchParams(url.searchParams);
   fwd.delete('_e');
-  const upstream = `${BASE}/${endpoint}${fwd.size > 0 ? `?${fwd.toString()}` : ''}`;
+  const fwdStr   = fwd.toString();
+  const upstream = `${BASE}/${endpoint}${fwdStr ? `?${fwdStr}` : ''}`;
 
   const cached = CACHE[upstream];
   if (cached && Date.now() - cached.ts < TTL) {
