@@ -1,34 +1,153 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Activity, CalendarDays, Trophy, Users, ArrowRight } from 'lucide-react';
-import { matches, clubs, tournaments, notifications, Match } from '../data/mockData';
+import { clubs, tournaments, notifications, Match } from '../data/mockData';
+import { matches as mockMatches } from '../data/mockData';
 import { Section } from '../app/main';
 import { ClubBadge } from './ClubLogo';
 import { useAuth } from '../app/main';
+import { rugbyApi, NormalisedMatch, LEAGUES } from '../services/rugbyApi';
 
 interface Props { setSection: (s: Section) => void; }
 
+// Minimal type satisfied by both Match (mockData) and NormalisedMatch (API)
+type MatchLike = {
+  id: number;
+  home: string;
+  homeId: string;
+  homeLogo?: string;
+  away: string;
+  awayId: string;
+  awayLogo?: string;
+  homeScore?: number;
+  awayScore?: number;
+  status: 'live' | 'upcoming' | 'finished';
+  minute?: string;
+  date: string;
+  time: string;
+  tournament: string;
+  venue?: string;
+};
+
+export function MatchCard({ match: m }: { match: MatchLike }) {
+  const homeInit = m.home.split(' ').map(w => w[0]).slice(0, 2).join('');
+  const awayInit = m.away.split(' ').map(w => w[0]).slice(0, 2).join('');
+
+  return (
+    <div className="match-card">
+      <div className="match-card-header">
+        <span className="match-tournament-label">{m.tournament}</span>
+        <span className={`status-badge ${m.status}`}>
+          {m.status === 'live' ? 'En vivo' : m.status === 'finished' ? 'Finalizado' : 'Próximo'}
+        </span>
+      </div>
+      <div className="match-teams">
+        <div className="match-team">
+          {m.homeLogo
+            ? <img src={m.homeLogo} alt={m.home} style={{ width: 44, height: 44, objectFit: 'contain' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            : <ClubBadge clubId={m.homeId} initials={homeInit} size={44} />
+          }
+          <div className="match-team-name">{m.home}</div>
+        </div>
+        <div className="match-score-block">
+          {m.status === 'upcoming' ? (
+            <div style={{ textAlign: 'center' }}>
+              <div className="match-upcoming-time">{m.time}</div>
+              <div className="match-upcoming-date">{m.date}</div>
+            </div>
+          ) : (
+            <>
+              <div className="match-score-nums">
+                <span>{m.homeScore ?? '-'}</span>
+                <span className="match-score-sep"> – </span>
+                <span>{m.awayScore ?? '-'}</span>
+              </div>
+              {m.status === 'live' && <span className="match-score-time">{m.minute}</span>}
+            </>
+          )}
+        </div>
+        <div className="match-team">
+          {m.awayLogo
+            ? <img src={m.awayLogo} alt={m.away} style={{ width: 44, height: 44, objectFit: 'contain' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            : <ClubBadge clubId={m.awayId} initials={awayInit} size={44} />
+          }
+          <div className="match-team-name">{m.away}</div>
+        </div>
+      </div>
+      {m.venue && <div className="match-venue">{m.venue}</div>}
+    </div>
+  );
+}
+
 export default function Home({ setSection }: Props) {
   const { user } = useAuth();
-  const liveCount     = matches.filter(m => m.status === 'live').length;
-  const upcomingCount = matches.filter(m => m.status === 'upcoming').length;
+
+  const [apiMatches,  setApiMatches]  = useState<NormalisedMatch[]>([]);
+  const [apiLoading,  setApiLoading]  = useState(true);
+
+  useEffect(() => {
+    Promise.allSettled([
+      rugbyApi.getLiveFixtures(),
+      rugbyApi.getFixtures(LEAGUES.SIX_NATIONS, 2025),
+      rugbyApi.getFixtures(LEAGUES.RUGBY_CHAMPIONSHIP, 2025),
+      rugbyApi.getFixtures(LEAGUES.SUPER_RUGBY, 2025),
+    ]).then(([live, sn, rc, sr]) => {
+      const liveMs = live.status === 'fulfilled' ? live.value : [];
+      const rest   = [sn, rc, sr]
+        .filter((r): r is PromiseFulfilledResult<NormalisedMatch[]> => r.status === 'fulfilled')
+        .flatMap(r => r.value.filter(m => m.status !== 'finished').slice(0, 6));
+
+      const liveIds = new Set(liveMs.map(m => m.id));
+      const merged  = [...liveMs, ...rest.filter(m => !liveIds.has(m.id))];
+
+      const seen = new Set<number>();
+      const unique = merged
+        .filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
+        .sort((a, b) => {
+          if (a.status === 'live'     && b.status !== 'live')     return -1;
+          if (b.status === 'live'     && a.status !== 'live')     return 1;
+          return a.date.localeCompare(b.date);
+        });
+
+      setApiMatches(unique);
+      setApiLoading(false);
+    });
+  }, []);
+
+  // Prefer API data for counts; fall back to mock
+  const liveCount     = apiMatches.length > 0
+    ? apiMatches.filter(m => m.status === 'live').length
+    : mockMatches.filter(m => m.status === 'live').length;
+
+  const upcomingCount = apiMatches.length > 0
+    ? apiMatches.filter(m => m.status === 'upcoming').length
+    : mockMatches.filter(m => m.status === 'upcoming').length;
+
   const activeCount   = tournaments.filter(t => t.status === 'active').length;
   const totalAffil    = clubs.reduce((s, c) => s + c.affiliates, 0);
 
-  // Matches for followed clubs (if user follows any)
-  const followedMatches = user?.followedClubs.length
-    ? matches.filter(m => user.followedClubs.includes(m.homeId) || user.followedClubs.includes(m.awayId))
+  // Followed club matches stay on mock data (local clubs)
+  const followedMatches: Match[] = user?.followedClubs.length
+    ? mockMatches.filter(m => user.followedClubs.includes(m.homeId) || user.followedClubs.includes(m.awayId))
     : [];
+
+  // Main matches: API when available, mock as fallback
+  const displayMatches: MatchLike[] = apiMatches.length > 0
+    ? apiMatches.slice(0, 5)
+    : (mockMatches.slice(0, 4) as MatchLike[]);
+
+  const nextUpcoming = apiMatches.find(m => m.status === 'upcoming')
+    ?? mockMatches.find(m => m.status === 'upcoming');
 
   return (
     <div>
       {/* Welcome banner */}
       <div style={{
         background: 'linear-gradient(135deg, #050d1a 0%, #081c12 55%, #0c3320 100%)',
-        borderRadius: 20, padding: '20px 24px', marginBottom: 20, color: '#fff',
+        borderRadius: 12, padding: '20px 24px', marginBottom: 20, color: '#fff',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         position: 'relative', overflow: 'hidden',
       }}>
-        <div style={{ position: 'absolute', width: 300, height: 300, borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)', top: -100, right: -50 }} />
+        <div style={{ position: 'absolute', width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.08) 0%, transparent 70%)', top: -90, right: -40 }} />
         <div style={{ zIndex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>
             Bienvenido, {user?.name.split(' ')[0]}
@@ -36,7 +155,7 @@ export default function Home({ setSection }: Props) {
           <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.55)' }}>
             {liveCount > 0
               ? `${liveCount} partido${liveCount > 1 ? 's' : ''} en vivo ahora mismo`
-              : 'Próximo partido: ' + (matches.find(m => m.status === 'upcoming')?.date ?? 'próximamente')}
+              : 'Próximo: ' + (nextUpcoming?.date ?? 'próximamente')}
           </div>
         </div>
         {liveCount > 0 && (
@@ -52,7 +171,7 @@ export default function Home({ setSection }: Props) {
           <div className="stat-card-icon"><Activity size={18} /></div>
           <div className="stat-label">En vivo</div>
           <div className="stat-value">{liveCount}</div>
-          <div className="stat-change up">● Ahora mismo</div>
+          <div className="stat-change up">Ahora mismo</div>
         </div>
         <div className="stat-card c-blue">
           <div className="stat-card-icon"><CalendarDays size={18} /></div>
@@ -76,7 +195,7 @@ export default function Home({ setSection }: Props) {
 
       <div className="content-grid">
         <div>
-          {/* Matches for followed clubs */}
+          {/* Followed club matches (local mock data) */}
           {followedMatches.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-header">
@@ -84,23 +203,36 @@ export default function Home({ setSection }: Props) {
                 <button className="btn btn-ghost btn-sm" onClick={() => setSection('matches')}>Ver todos →</button>
               </div>
               <div className="match-list">
-                {followedMatches.slice(0, 2).map(m => <MatchCard key={m.id} match={m} />)}
+                {followedMatches.slice(0, 2).map(m => <MatchCard key={m.id} match={m as MatchLike} />)}
               </div>
             </div>
           )}
 
-          {/* All recent matches */}
+          {/* Recent / live — API data */}
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Partidos recientes y en vivo</span>
+              <span className="card-title">
+                {apiMatches.length > 0 ? 'Partidos internacionales' : 'Partidos recientes y en vivo'}
+              </span>
               <button className="btn btn-ghost btn-sm" onClick={() => setSection('matches')}>Ver todos →</button>
             </div>
-            <div className="match-list">
-              {matches.slice(0, 4).map(m => <MatchCard key={m.id} match={m} />)}
-            </div>
+            {apiLoading && apiMatches.length === 0 ? (
+              <div style={{ padding: '12px 0' }}>
+                {[0, 1, 2].map(i => (
+                  <div key={i} style={{ padding: '10px 16px', opacity: 0.4 }}>
+                    <div style={{ height: 11, background: 'var(--border)', borderRadius: 3, width: '40%', marginBottom: 8 }} />
+                    <div style={{ height: 16, background: 'var(--border)', borderRadius: 3, width: '70%' }} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="match-list">
+                {displayMatches.map(m => <MatchCard key={m.id} match={m} />)}
+              </div>
+            )}
           </div>
 
-          {/* Ranking */}
+          {/* Club ranking */}
           <div className="card" style={{ marginTop: 16 }}>
             <div className="card-header">
               <span className="card-title"><Trophy size={15} /> Ranking de clubes</span>
@@ -172,10 +304,10 @@ export default function Home({ setSection }: Props) {
             <div className="card-header"><span className="card-title">Accesos rápidos</span></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {([
-                ['Comunidad',  'community'],
-                ['Clubes',     'clubs'],
+                ['Comunidad',   'community'],
+                ['Clubes',      'clubs'],
                 ['Predicciones','community'],
-                ['Encuestas',  'community'],
+                ['Encuestas',   'community'],
               ] as [string, Section][]).map(([label, dest]) => (
                 <button key={label} className="btn btn-secondary btn-sm" style={{ justifyContent: 'flex-start' }} onClick={() => setSection(dest)}>
                   {label}
@@ -185,50 +317,6 @@ export default function Home({ setSection }: Props) {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function MatchCard({ match: m }: { match: Match }) {
-  const homeInit = m.home.split(' ').map(w => w[0]).slice(0, 2).join('');
-  const awayInit = m.away.split(' ').map(w => w[0]).slice(0, 2).join('');
-
-  return (
-    <div className="match-card">
-      <div className="match-card-header">
-        <span className="match-tournament-label">{m.tournament}</span>
-        <span className={`status-badge ${m.status}`}>
-          {m.status === 'live' ? 'En vivo' : m.status === 'finished' ? 'Finalizado' : 'Próximo'}
-        </span>
-      </div>
-      <div className="match-teams">
-        <div className="match-team">
-          <ClubBadge clubId={m.homeId} initials={homeInit} size={44} />
-          <div className="match-team-name">{m.home}</div>
-        </div>
-        <div className="match-score-block">
-          {m.status === 'upcoming' ? (
-            <div style={{ textAlign: 'center' }}>
-              <div className="match-upcoming-time">{m.time}</div>
-              <div className="match-upcoming-date">{m.date}</div>
-            </div>
-          ) : (
-            <>
-              <div className="match-score-nums">
-                <span>{m.homeScore}</span>
-                <span className="match-score-sep"> – </span>
-                <span>{m.awayScore}</span>
-              </div>
-              {m.status === 'live' && <span className="match-score-time">{m.minute}</span>}
-            </>
-          )}
-        </div>
-        <div className="match-team">
-          <ClubBadge clubId={m.awayId} initials={awayInit} size={44} />
-          <div className="match-team-name">{m.away}</div>
-        </div>
-      </div>
-      {m.venue && <div className="match-venue">{m.venue}</div>}
     </div>
   );
 }
