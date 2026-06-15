@@ -234,10 +234,13 @@ function normaliseStanding(s: ApiStanding): NormalisedStanding {
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
 async function get<T>(path: string, params: Record<string, string | number> = {}): Promise<T[]> {
-  const qs  = new URLSearchParams(
-    Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
+  // _e carries the endpoint name so all requests hit /api/rugby (single Vercel function)
+  const qs = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries({ _e: path, ...params }).map(([k, v]) => [k, String(v)])
+    )
   ).toString();
-  const url = `${BASE}/${path}${qs ? `?${qs}` : ''}`;
+  const url = `${BASE}?${qs}`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body: ApiResponse<T> = await res.json();
