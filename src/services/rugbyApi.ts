@@ -240,18 +240,33 @@ async function get<T>(path: string, params: Record<string, string | number> = {}
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const rugbyApi = {
-  /** Live and today's games (fetches by date, filters live status client-side) */
-  getLiveFixtures(): Promise<NormalisedMatch[]> {
-    return get<ApiGame>('games', { date: todayUTC() })
-      .then(r => r.map(normaliseGame).filter(m => m.status === 'live'));
-  },
-
-  /** Today's games (all statuses) */
+  /** Today's games (all statuses — no season restriction) */
   getTodayGames(): Promise<NormalisedMatch[]> {
     return get<ApiGame>('games', { date: todayUTC() }).then(r => r.map(normaliseGame));
   },
 
-  /** All games for a league + season */
+  /** Games for a specific date */
+  getGamesByDate(date: string): Promise<NormalisedMatch[]> {
+    return get<ApiGame>('games', { date }).then(r => r.map(normaliseGame));
+  },
+
+  /** Next N days of upcoming games (parallel date queries, no season restriction) */
+  getUpcomingGames(daysAhead = 5): Promise<NormalisedMatch[]> {
+    const today = new Date();
+    const dates = Array.from({ length: daysAhead }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i + 1);
+      return d.toISOString().slice(0, 10);
+    });
+    return Promise.allSettled(dates.map(date => get<ApiGame>('games', { date })))
+      .then(results =>
+        results
+          .filter((r): r is PromiseFulfilledResult<ApiGame[]> => r.status === 'fulfilled')
+          .flatMap(r => r.value.map(normaliseGame))
+      );
+  },
+
+  /** All games for a league + season (free plan: 2022–2024 only) */
   getFixtures(leagueId: number, season: number): Promise<NormalisedMatch[]> {
     return get<ApiGame>('games', { league: leagueId, season }).then(r => r.map(normaliseGame));
   },

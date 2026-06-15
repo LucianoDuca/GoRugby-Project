@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Heart, MessageCircle, Repeat2, BarChart2, Image, X, Send, PlusCircle, TrendingUp } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Heart, MessageCircle, Repeat2, BarChart2, Image, X, Send, PlusCircle, TrendingUp, Activity, Calendar } from 'lucide-react';
 import { useAuth } from '../app/main';
 import { initialPosts, SocialPost, PostComment, Poll } from '../data/mockData';
+import { rugbyApi, NormalisedMatch } from '../services/rugbyApi';
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
@@ -352,6 +353,129 @@ function PostComposer({ onPost }: {
   );
 }
 
+// ─── Live scores sidebar ──────────────────────────────────────────────────────
+
+function LiveScoresSidebar() {
+  const [todayGames, setTodayGames]     = useState<NormalisedMatch[]>([]);
+  const [upcoming,   setUpcoming]       = useState<NormalisedMatch[]>([]);
+  const [loading,    setLoading]        = useState(true);
+
+  useEffect(() => {
+    Promise.allSettled([
+      rugbyApi.getTodayGames(),
+      rugbyApi.getUpcomingGames(3),
+    ]).then(([todayRes, upcomingRes]) => {
+      const today    = todayRes.status    === 'fulfilled' ? todayRes.value    : [];
+      const upcoming = upcomingRes.status === 'fulfilled' ? upcomingRes.value : [];
+      setTodayGames(today);
+      setUpcoming(upcoming.filter(m => m.status === 'upcoming').slice(0, 5));
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const live     = todayGames.filter(m => m.status === 'live');
+  const finished = todayGames.filter(m => m.status === 'finished');
+
+  const ScoreRow = ({ m }: { m: NormalisedMatch }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 12,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+          {m.tournamentLogo && <img src={m.tournamentLogo} alt="" style={{ width: 12, height: 12, objectFit: 'contain' }}
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+          <span style={{ fontSize: 10, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {m.tournament}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {m.homeLogo && <img src={m.homeLogo} alt="" style={{ width: 14, height: 14, objectFit: 'contain' }}
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+          <span style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>
+            {m.home.split(' ').slice(-1)[0]}
+          </span>
+          <span style={{ color: 'var(--text-3)', fontSize: 10, flex: '0 0 auto' }}>
+            {m.status === 'upcoming'
+              ? m.time
+              : `${m.homeScore ?? '-'} – ${m.awayScore ?? '-'}`}
+          </span>
+          <span style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>
+            {m.away.split(' ').slice(-1)[0]}
+          </span>
+          {m.awayLogo && <img src={m.awayLogo} alt="" style={{ width: 14, height: 14, objectFit: 'contain' }}
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+        </div>
+      </div>
+      <span className={`status-badge ${m.status}`} style={{ fontSize: 9, flexShrink: 0, marginLeft: 6 }}>
+        {m.status === 'live' ? (m.minute ? `${m.minute}'` : 'VIVO') : m.status === 'finished' ? 'FT' : m.date.slice(5)}
+      </span>
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div className="card">
+        <div className="card-header"><span className="card-title">Partidos de hoy</span></div>
+        {[0,1,2].map(i => (
+          <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', opacity: 0.4 }}>
+            <div style={{ height: 10, background: 'var(--border)', borderRadius: 3, width: '60%', marginBottom: 6 }} />
+            <div style={{ height: 12, background: 'var(--border)', borderRadius: 3, width: '80%' }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Live now */}
+      {live.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-header">
+            <span className="card-title" style={{ color: 'var(--live)' }}>
+              <Activity size={13} style={{ display: 'inline', marginRight: 5 }} />
+              En vivo
+            </span>
+            <div className="live-dot" />
+          </div>
+          {live.map(m => <ScoreRow key={m.id} m={m} />)}
+        </div>
+      )}
+
+      {/* Today's results */}
+      {finished.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-header">
+            <span className="card-title">Resultados de hoy</span>
+          </div>
+          {finished.map(m => <ScoreRow key={m.id} m={m} />)}
+        </div>
+      )}
+
+      {/* Upcoming */}
+      {upcoming.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">
+              <Calendar size={13} style={{ display: 'inline', marginRight: 5 }} />
+              Próximos
+            </span>
+          </div>
+          {upcoming.map(m => <ScoreRow key={m.id} m={m} />)}
+        </div>
+      )}
+
+      {live.length === 0 && finished.length === 0 && upcoming.length === 0 && (
+        <div className="card">
+          <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+            Sin partidos hoy
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Community() {
@@ -436,18 +560,28 @@ export default function Community() {
 
   return (
     <div className="community-page">
-      <div className="social-feed">
-        <PostComposer onPost={createPost} />
-        <div className="feed-divider" />
-        {posts.map(post => (
-          <PostCard
-            key={post.id}
-            post={post}
-            onLike={likePost}
-            onComment={commentOnPost}
-            onVote={votePoll}
-          />
-        ))}
+      <div className="content-grid">
+        {/* Main feed */}
+        <div>
+          <div className="social-feed">
+            <PostComposer onPost={createPost} />
+            <div className="feed-divider" />
+            {posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onLike={likePost}
+                onComment={commentOnPost}
+                onVote={votePoll}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Sidebar: live scores + upcoming */}
+        <div>
+          <LiveScoresSidebar />
+        </div>
       </div>
     </div>
   );

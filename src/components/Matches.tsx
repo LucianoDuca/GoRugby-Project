@@ -148,10 +148,14 @@ function SkeletonRow() {
 }
 
 export default function Matches() {
-  const [matches, setMatches]     = useState<NormalisedMatch[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [matches, setMatches]         = useState<NormalisedMatch[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [apiOnline, setApiOnline]     = useState<boolean | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Upcoming future games (date-based, loaded on demand)
+  const [upcomingLoaded,  setUpcomingLoaded]  = useState(false);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(false);
 
   const [status,     setStatus]     = useState<StatusFilter>('all');
   const [tournament, setTournament] = useState('all');
@@ -193,6 +197,20 @@ export default function Matches() {
     const id = setInterval(fetchAll, 5 * 60_000); // 5 min — free plan: 100 req/day
     return () => clearInterval(id);
   }, [fetchAll]);
+
+  // When user switches to "Próximos", auto-load next 5 days via date queries
+  useEffect(() => {
+    if (status !== 'upcoming' || upcomingLoaded || loadingUpcoming) return;
+    setLoadingUpcoming(true);
+    rugbyApi.getUpcomingGames(5).then(upcoming => {
+      setMatches(prev => {
+        const seen = new Set(prev.map(m => m.id));
+        const fresh = upcoming.filter(m => !seen.has(m.id));
+        return [...prev, ...fresh];
+      });
+      setUpcomingLoaded(true);
+    }).finally(() => setLoadingUpcoming(false));
+  }, [status, upcomingLoaded, loadingUpcoming]);
 
   const allMonths      = useMemo(() => uniqueMonths(matches),      [matches]);
   const allTournaments = useMemo(() => uniqueTournaments(matches), [matches]);
@@ -323,6 +341,14 @@ export default function Matches() {
       )}
 
       {/* Results */}
+      {/* Upcoming loading indicator */}
+      {loadingUpcoming && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', fontSize: 12, color: 'var(--text-3)' }}>
+          <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+          Buscando próximos partidos…
+        </div>
+      )}
+
       {loading && matches.length === 0 ? (
         <div className="matches-grouped">
           {[0, 1].map(i => (
