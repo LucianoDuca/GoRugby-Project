@@ -9,6 +9,7 @@ export interface User {
   clubId?: string;
   joinedAt: string;
   followedClubs: string[];
+  followedIntlTeams?: string[];   // "<teamId>|<leagueName>" e.g. "23|Six Nations"
   totalReviews: number;
   totalPredictions: number;
   bio?: string;

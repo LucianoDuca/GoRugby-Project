@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, CalendarDays, MessageCircle, Trophy, Shield, UserRound, Settings, Lock, LogOut, TrendingUp } from 'lucide-react';
+import { Home, CalendarDays, MessageCircle, Trophy, Shield, UserRound, Settings, Lock, LogOut, TrendingUp, Play } from 'lucide-react';
 import { useAuth, useLive, Section } from '../app/main';
 import { loadPredictions, getPredictionStats } from '../utils/predictions';
 
@@ -14,6 +14,7 @@ const NAV_MAIN: { id: Section; label: string; Icon: React.ElementType }[] = [
   { id: 'community',   label: 'Comunidad', Icon: MessageCircle },
   { id: 'tournaments', label: 'Torneos',   Icon: Trophy },
   { id: 'clubs',       label: 'Clubes',    Icon: Shield },
+  { id: 'highlights',  label: 'Highlights', Icon: Play },
 ];
 
 const NAV_USER: { id: Section; label: string; Icon: React.ElementType }[] = [

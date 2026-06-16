@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, MapPin, X, Calendar, Users, Globe, Loader, ChevronDown } from 'lucide-react';
+import { Search, MapPin, X, Calendar, Users, Globe, Loader, ChevronDown, BookOpen, Star } from 'lucide-react';
 import { clubs, matches } from '../data/mockData';
 import { useAuth } from '../app/main';
 import { ClubLogo } from './ClubLogo';
 import { NormalisedMatch } from '../services/rugbyApi';
 import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
+import { theSportsDbApi, TSDBNormalisedTeam } from '../services/theSportsDbApi';
+import MatchModal from './MatchModal';
 
 type Tab = 'local' | 'international';
 
@@ -41,17 +43,22 @@ function extractTeams(ms: NormalisedMatch[]): IntlTeam[] {
 // ── International teams section ───────────────────────────────────────────────
 
 function InternationalClubs() {
+  const { user, updateUser }                    = useAuth();
   const [selectedLeague,   setSelectedLeague]   = useState(INTL_LEAGUES[0]);
   const [leagueMatches,    setLeagueMatches]    = useState<NormalisedMatch[]>([]);
   const [loading,          setLoading]          = useState(false);
   const [selectedTeam,     setSelectedTeam]     = useState<IntlTeam | null>(null);
   const [showLeaguePicker, setShowLeaguePicker] = useState(false);
   const [query,            setQuery]            = useState('');
+  const [tsdbInfo,         setTsdbInfo]         = useState<TSDBNormalisedTeam | null>(null);
+  const [tsdbLoading,      setTsdbLoading]      = useState(false);
+  const [modalMatch,       setModalMatch]       = useState<NormalisedMatch | null>(null);
 
   const fetchMatches = (league: typeof INTL_LEAGUES[0]) => {
     setLoading(true);
     setLeagueMatches([]);
     setSelectedTeam(null);
+    setTsdbInfo(null);
     espnApi.getLeagueGames(league.id)
       .then(ms => setLeagueMatches(ms))
       .catch(() => setLeagueMatches([]))
@@ -59,6 +66,29 @@ function InternationalClubs() {
   };
 
   useEffect(() => { fetchMatches(selectedLeague); }, []);
+
+  // Fetch TheSportsDB info when a team is selected
+  useEffect(() => {
+    if (!selectedTeam) { setTsdbInfo(null); return; }
+    setTsdbLoading(true);
+    theSportsDbApi.searchTeam(selectedTeam.name)
+      .then(info => setTsdbInfo(info))
+      .catch(() => setTsdbInfo(null))
+      .finally(() => setTsdbLoading(false));
+  }, [selectedTeam]);
+
+  const followKey = (teamId: string) => `${teamId}|${selectedLeague.name}`;
+
+  const isFollowing = (teamId: string) =>
+    user?.followedIntlTeams?.includes(followKey(teamId)) ?? false;
+
+  const toggleFollow = (teamId: string) => {
+    if (!user) return;
+    const key      = followKey(teamId);
+    const current  = user.followedIntlTeams ?? [];
+    const followed = current.includes(key);
+    updateUser({ followedIntlTeams: followed ? current.filter(k => k !== key) : [...current, key] });
+  };
 
   const selectLeague = (league: typeof INTL_LEAGUES[0]) => {
     setSelectedLeague(league);
@@ -83,31 +113,92 @@ function InternationalClubs() {
 
   // Team detail view
   if (selectedTeam) {
+    const following = isFollowing(selectedTeam.id);
+
     return (
       <div>
         <button
           className="btn btn-ghost btn-sm"
           style={{ marginBottom: 16 }}
-          onClick={() => setSelectedTeam(null)}
+          onClick={() => { setSelectedTeam(null); setModalMatch(null); }}
         >
           ← {selectedLeague.name}
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-          {selectedTeam.logo && (
-            <img src={selectedTeam.logo} alt={selectedTeam.name}
-              style={{ width: 60, height: 60, objectFit: 'contain' }}
+        {/* Team hero */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+          {selectedTeam.logo || tsdbInfo?.logo ? (
+            <img src={tsdbInfo?.logo ?? selectedTeam.logo} alt={selectedTeam.name}
+              style={{ width: 64, height: 64, objectFit: 'contain' }}
               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-          )}
-          <div>
+          ) : null}
+          <div style={{ flex: 1 }}>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{selectedTeam.name}</div>
             <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
               <Globe size={11} style={{ display: 'inline', marginRight: 4 }} />
               {selectedLeague.name} · {selectedLeague.country}
+              {tsdbInfo?.country && ` · ${tsdbInfo.country}`}
             </div>
           </div>
+          <button
+            className={`btn btn-sm ${following ? 'btn-secondary' : 'btn-primary'}`}
+            onClick={() => toggleFollow(selectedTeam.id)}
+          >
+            {following ? '✓ Siguiendo' : '+ Seguir'}
+          </button>
         </div>
 
+        {/* TheSportsDB info cards */}
+        {tsdbLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+            <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} />
+            Cargando información del equipo…
+          </div>
+        )}
+
+        {tsdbInfo && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+            {tsdbInfo.stadium && (
+              <div className="card" style={{ padding: '12px 14px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+                  <MapPin size={10} style={{ display: 'inline', marginRight: 3 }} />Estadio
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{tsdbInfo.stadium}</div>
+              </div>
+            )}
+            {tsdbInfo.formed && (
+              <div className="card" style={{ padding: '12px 14px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+                  <Calendar size={10} style={{ display: 'inline', marginRight: 3 }} />Fundado
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{tsdbInfo.formed}</div>
+              </div>
+            )}
+            {tsdbInfo.country && (
+              <div className="card" style={{ padding: '12px 14px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+                  <Globe size={10} style={{ display: 'inline', marginRight: 3 }} />País
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{tsdbInfo.country}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tsdbInfo?.description && (
+          <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+              <BookOpen size={10} style={{ display: 'inline', marginRight: 3 }} />Sobre el equipo
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6, margin: 0 }}>
+              {tsdbInfo.description.length > 400
+                ? `${tsdbInfo.description.slice(0, 400)}…`
+                : tsdbInfo.description}
+            </p>
+          </div>
+        )}
+
+        {/* Matches */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">
@@ -123,10 +214,17 @@ function InternationalClubs() {
             <p style={{ padding: '16px', color: 'var(--text-3)', fontSize: 13 }}>Sin partidos registrados.</p>
           ) : (
             teamMatches.map(m => (
-              <div key={m.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13,
-              }}>
+              <div
+                key={m.id}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13,
+                  cursor: 'pointer', transition: 'background .15s',
+                }}
+                onClick={() => setModalMatch(m)}
+                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--surface-2)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = ''; }}
+              >
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
                     {m.homeLogo && <img src={m.homeLogo} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }}
@@ -151,12 +249,17 @@ function InternationalClubs() {
             ))
           )}
         </div>
+
+        {modalMatch && (
+          <MatchModal match={modalMatch} onClose={() => setModalMatch(null)} />
+        )}
       </div>
     );
   }
 
   return (
     <div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       {/* League selector */}
       <div style={{ position: 'relative', marginBottom: 16 }}>
         <button

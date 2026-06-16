@@ -9,6 +9,7 @@ const TITLES: Record<Section, string> = {
   community:   'Comunidad',
   tournaments: 'Torneos',
   clubs:       'Clubes',
+  highlights:  'Highlights',
   profile:     'Mi Perfil',
   admin:       'Panel Administrativo',
   settings:    'Ajustes',

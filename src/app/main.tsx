@@ -16,10 +16,11 @@ import Clubs from '../components/Clubs';
 import Tournaments from '../components/Tournaments';
 import Admin from '../components/Admin';
 import Settings from '../components/Settings';
+import Highlights from '../components/Highlights';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type Section = 'home' | 'matches' | 'community' | 'tournaments' | 'clubs' | 'profile' | 'admin' | 'settings';
+export type Section = 'home' | 'matches' | 'community' | 'tournaments' | 'clubs' | 'highlights' | 'profile' | 'admin' | 'settings';
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
 
@@ -201,6 +202,7 @@ function App() {
                 {section === 'community'   && <Community />}
                 {section === 'tournaments' && <Tournaments />}
                 {section === 'clubs'       && <Clubs />}
+                {section === 'highlights'  && <Highlights />}
                 {section === 'profile'     && <Profile />}
                 {section === 'admin'       && user.role === 'admin' && <Admin />}
                 {section === 'settings'    && <Settings />}

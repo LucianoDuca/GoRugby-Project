@@ -1,10 +1,14 @@
 import { useState, Fragment, useEffect } from 'react';
-import { ChevronRight, ChevronLeft, Trophy, Globe, MapPin, Users, ArrowLeft, Loader } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Trophy, Globe, MapPin, Users, ArrowLeft, Loader, BarChart2 } from 'lucide-react';
 import { tournamentTree, TournamentNode, matches } from '../data/mockData';
 import { NormalisedMatch } from '../services/rugbyApi';
 import { espnApi, ESPN_LEAGUES } from '../services/espnApi';
+import { highlightlyApi, HLNormalisedStanding } from '../services/highlightlyApi';
+import { mappingByEspnId } from '../data/idMapping';
+import MatchModal from './MatchModal';
 
 type Tab = 'local' | 'international';
+type LeagueTab = 'partidos' | 'posiciones';
 
 type IntlTournament = { id: number; name: string; country: string; type: string; };
 
@@ -40,14 +44,24 @@ function countActive(node: TournamentNode): number {
   return (node.children ?? []).reduce((s, c) => s + countActive(c), 0);
 }
 
-// ── Match row used in league detail ───────────────────────────────────────────
+// ── Match row (clickable) ─────────────────────────────────────────────────────
 
-function MatchRow({ m }: { m: NormalisedMatch }) {
+function MatchRow({ m, onClick }: { m: NormalisedMatch; onClick?: (m: NormalisedMatch) => void }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13,
-    }}>
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'background .15s',
+      }}
+      onClick={() => onClick?.(m)}
+      onMouseEnter={e => { if (onClick) (e.currentTarget as HTMLDivElement).style.background = 'var(--surface-2)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = ''; }}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={e => { if (onClick && e.key === 'Enter') onClick(m); }}
+    >
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
           {m.homeLogo && (
@@ -76,13 +90,97 @@ function MatchRow({ m }: { m: NormalisedMatch }) {
   );
 }
 
-function MatchSection({ title, ms, titleColor }: { title: string; ms: NormalisedMatch[]; titleColor?: string }) {
+function MatchSection({ title, ms, titleColor, onOpen }: {
+  title: string;
+  ms: NormalisedMatch[];
+  titleColor?: string;
+  onOpen?: (m: NormalisedMatch) => void;
+}) {
   return (
     <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 13, color: titleColor }}>
         {title}
       </div>
-      {ms.map(m => <MatchRow key={m.id} m={m} />)}
+      {ms.map(m => <MatchRow key={m.id} m={m} onClick={onOpen} />)}
+    </div>
+  );
+}
+
+// ── Standings table ───────────────────────────────────────────────────────────
+
+function StandingsTable({ standings, loading }: { standings: HLNormalisedStanding[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', padding: '24px 0' }}>
+        <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+        Cargando posiciones…
+      </div>
+    );
+  }
+
+  if (standings.length === 0) {
+    return (
+      <div className="card" style={{ padding: 20, textAlign: 'center' }}>
+        <BarChart2 size={24} style={{ color: 'var(--text-3)', margin: '0 auto 8px' }} />
+        <p style={{ fontSize: 13, color: 'var(--text-3)', margin: 0 }}>
+          Posiciones no disponibles para esta liga.<br />
+          <span style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+            Se activarán automáticamente una vez que se configure el ID de Highlightly.
+          </span>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '32px 1fr 40px 40px 40px 40px 44px',
+        gap: 0,
+        padding: '8px 12px',
+        borderBottom: '1px solid var(--border)',
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+        color: 'var(--text-3)',
+      }}>
+        <span>#</span>
+        <span>Equipo</span>
+        <span style={{ textAlign: 'center' }}>PJ</span>
+        <span style={{ textAlign: 'center' }}>G</span>
+        <span style={{ textAlign: 'center' }}>E</span>
+        <span style={{ textAlign: 'center' }}>P</span>
+        <span style={{ textAlign: 'right' }}>Pts</span>
+      </div>
+      {standings.map((s, i) => (
+        <div key={s.teamId} style={{
+          display: 'grid',
+          gridTemplateColumns: '32px 1fr 40px 40px 40px 40px 44px',
+          alignItems: 'center',
+          padding: '9px 12px',
+          borderBottom: i < standings.length - 1 ? '1px solid var(--border)' : 'none',
+          fontSize: 13,
+          background: i % 2 === 0 ? 'transparent' : 'var(--surface-2)',
+        }}>
+          <span style={{ fontWeight: 700, color: i < 3 ? 'var(--accent)' : 'var(--text-3)', fontSize: 12 }}>
+            {s.position}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            {s.teamLogo && (
+              <img src={s.teamLogo} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            )}
+            <span style={{ fontWeight: 600 }}>{s.teamName}</span>
+          </div>
+          <span style={{ textAlign: 'center', color: 'var(--text-2)' }}>{s.played}</span>
+          <span style={{ textAlign: 'center', color: 'var(--text-2)' }}>{s.won}</span>
+          <span style={{ textAlign: 'center', color: 'var(--text-2)' }}>{s.drawn}</span>
+          <span style={{ textAlign: 'center', color: 'var(--text-2)' }}>{s.lost}</span>
+          <span style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text)' }}>{s.points}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -94,12 +192,18 @@ function InternationalView() {
   const [leagueMatches, setLeagueMatches] = useState<NormalisedMatch[]>([]);
   const [logo,          setLogo]          = useState('');
   const [loading,       setLoading]       = useState(false);
+  const [leagueTab,     setLeagueTab]     = useState<LeagueTab>('partidos');
+  const [standings,     setStandings]     = useState<HLNormalisedStanding[]>([]);
+  const [loadingStand,  setLoadingStand]  = useState(false);
+  const [modalMatch,    setModalMatch]    = useState<NormalisedMatch | null>(null);
 
   const openLeague = (t: IntlTournament) => {
     setSelected(t);
     setLeagueMatches([]);
     setLogo('');
     setLoading(true);
+    setLeagueTab('partidos');
+    setStandings([]);
     espnApi.getLeagueGames(t.id)
       .then(ms => {
         setLeagueMatches(ms);
@@ -108,6 +212,23 @@ function InternationalView() {
       })
       .catch(() => setLeagueMatches([]))
       .finally(() => setLoading(false));
+  };
+
+  const loadStandings = (t: IntlTournament) => {
+    const mapping = mappingByEspnId(t.id);
+    if (!mapping?.highlightlyId) { setStandings([]); return; }
+    setLoadingStand(true);
+    highlightlyApi.getStandings(mapping.highlightlyId, mapping.season)
+      .then(s => setStandings(s))
+      .catch(() => setStandings([]))
+      .finally(() => setLoadingStand(false));
+  };
+
+  const handleLeagueTab = (tab: LeagueTab) => {
+    setLeagueTab(tab);
+    if (tab === 'posiciones' && selected && standings.length === 0 && !loadingStand) {
+      loadStandings(selected);
+    }
   };
 
   // Detail view for selected league
@@ -121,12 +242,12 @@ function InternationalView() {
         <button
           className="tourney-back-btn"
           style={{ marginBottom: 16 }}
-          onClick={() => { setSelected(null); setLeagueMatches([]); }}
+          onClick={() => { setSelected(null); setLeagueMatches([]); setModalMatch(null); }}
         >
           <ArrowLeft size={14} /> Todas las ligas
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           {logo && (
             <img src={logo} alt={selected.name} style={{ width: 44, height: 44, objectFit: 'contain' }}
               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -139,7 +260,26 @@ function InternationalView() {
           </div>
         </div>
 
-        {loading ? (
+        {/* League sub-tabs */}
+        <div className="filter-tabs" style={{ marginBottom: 16 }}>
+          <button
+            className={`filter-tab${leagueTab === 'partidos' ? ' active' : ''}`}
+            onClick={() => handleLeagueTab('partidos')}
+          >
+            Partidos
+          </button>
+          <button
+            className={`filter-tab${leagueTab === 'posiciones' ? ' active' : ''}`}
+            onClick={() => handleLeagueTab('posiciones')}
+          >
+            <BarChart2 size={11} style={{ display: 'inline', marginRight: 4 }} />
+            Posiciones
+          </button>
+        </div>
+
+        {leagueTab === 'posiciones' ? (
+          <StandingsTable standings={standings} loading={loadingStand} />
+        ) : loading ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', padding: '20px 0' }}>
             <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
             Cargando partidos…
@@ -149,15 +289,19 @@ function InternationalView() {
         ) : (
           <>
             {live.length > 0 && (
-              <MatchSection title="En vivo" ms={live} titleColor="var(--live)" />
+              <MatchSection title="En vivo" ms={live} titleColor="var(--live)" onOpen={setModalMatch} />
             )}
             {upcoming.length > 0 && (
-              <MatchSection title="Próximos partidos" ms={upcoming.slice(0, 12)} />
+              <MatchSection title="Próximos partidos" ms={upcoming.slice(0, 12)} onOpen={setModalMatch} />
             )}
             {finished.length > 0 && (
-              <MatchSection title="Últimos resultados" ms={finished.slice(0, 12)} />
+              <MatchSection title="Últimos resultados" ms={finished.slice(0, 12)} onOpen={setModalMatch} />
             )}
           </>
+        )}
+
+        {modalMatch && (
+          <MatchModal match={modalMatch} onClose={() => setModalMatch(null)} />
         )}
       </div>
     );
